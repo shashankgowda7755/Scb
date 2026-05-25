@@ -833,8 +833,20 @@ function App() {
     // Participant routes only need events (to resolve the event id from the URL).
     // Loading every registration / check-in / check-out / attendance row on a phone
     // over a slow connection was hanging the participant page for some operators.
+    // Phase A rules: /registrations + /checkins + /checkouts + /attendance reads
+    // require admin auth. Subscribe to those ONLY after authUser is set, otherwise
+    // Firestore returns permission-denied silently and the operator dashboard
+    // stays empty.
     const unsubEvents = subscribeEvents(setEvents);
     if (participantMode) {
+      return () => unsubEvents();
+    }
+    if (!authUser) {
+      // Operator not signed in yet — clear stale state, wait for auth.
+      setRegistrations([]);
+      setCheckIns([]);
+      setCheckOuts([]);
+      setAttendanceRows([]);
       return () => unsubEvents();
     }
     const unsubRegs = subscribeRegistrations(setRegistrations);
@@ -848,7 +860,7 @@ function App() {
       unsubOuts();
       unsubAtt();
     };
-  }, [participantMode]);
+  }, [participantMode, authUser]);
 
   useEffect(() => {
     if (!events.length) {
