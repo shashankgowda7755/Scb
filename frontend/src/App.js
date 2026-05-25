@@ -311,18 +311,24 @@ function validateRegistrationForm(event, formData) {
   return null;
 }
 
-async function downloadCsv(filename, rows) {
+async function downloadCsv(filename, rows, event) {
+  // Build header. Base columns + per-event custom field columns (one column
+  // per field defined in the Form Builder for this event).
+  const customFields = Array.isArray(event?.formFields) ? event.formFields : [];
+
   const header = [
     "Event",
     "Client",
     "Participant Name",
-    "Bank ID",
+    event?.uniqueIdLabel || "Bank ID",
     "Email",
     "Phone",
     "Department",
     "City",
+    "Notes",
     "Participation",
     "Photo Consent",
+    ...customFields.map((f) => f.label || f.key),
     "Revision",
     "Created At",
     "Updated At",
@@ -330,24 +336,36 @@ async function downloadCsv(filename, rows) {
   ];
 
   // Decrypt right before export so the client handoff file has the full data.
+  // decryptRegistration handles both legacy ENCRYPTED_FIELDS (fullName, etc)
+  // and the Phase D set (department, city, notes, customData[*]).
   const decryptedRows = await decryptRegistrations(rows);
 
-  const safeRows = decryptedRows.map((row) => [
-    row.eventTitle,
-    row.clientName,
-    row.fullName,
-    row.employeeId,
-    row.email,
-    row.phone,
-    row.department,
-    row.city,
-    row.participation || "Yes",
-    row.photoConsent ? "Yes" : "No",
-    row.revision,
-    row.createdAt,
-    row.updatedAt,
-    row.expiresAt,
-  ]);
+  const safeRows = decryptedRows.map((row) => {
+    const cd = row.customData || {};
+    return [
+      row.eventTitle,
+      row.clientName,
+      row.fullName,
+      row.employeeId,
+      row.email,
+      row.phone,
+      row.department,
+      row.city,
+      row.notes,
+      row.participation || "Yes",
+      row.photoConsent ? "Yes" : "No",
+      ...customFields.map((f) => {
+        const v = cd[f.key];
+        if (v === undefined || v === null) return "";
+        if (typeof v === "boolean") return v ? "Yes" : "No";
+        return v;
+      }),
+      row.revision,
+      row.createdAt,
+      row.updatedAt,
+      row.expiresAt,
+    ];
+  });
 
   const csvContent = [header, ...safeRows]
     .map((columns) => columns.map((value) => `"${String(value ?? "").replace(/"/g, '""')}"`).join(","))
@@ -1153,6 +1171,7 @@ function App() {
       await downloadCsv(
         `${selectedEvent.clientName}-${selectedEvent.title}-registrations.csv`.replace(/\s+/g, "-").toLowerCase(),
         eventRegistrations,
+        selectedEvent,
       );
       setMessage({
         type: "success",
