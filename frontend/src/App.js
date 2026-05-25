@@ -407,7 +407,7 @@ function ParticipantPopup({ popup, onClose }) {
       return {
         tone: "good",
         title: "Registration captured",
-        body: "Your details have been saved securely. They are encrypted before storage and only the organisers can decrypt them.",
+        body: "Your details have been saved. Only the event team can see them.",
       };
     }
     if (popup.kind === "checkin") {
@@ -480,11 +480,6 @@ function ParticipantPopup({ popup, onClose }) {
         {popup.time && (
           <p className="participant-popup-meta">
             Time recorded: <strong>{formatDateTime(popup.time)}</strong>
-          </p>
-        )}
-        {popup.masked && (
-          <p className="participant-popup-meta">
-            ID (masked): <strong>{popup.masked}</strong>
           </p>
         )}
         <button type="button" className="gform-submit participant-popup-cta" onClick={onClose}>
