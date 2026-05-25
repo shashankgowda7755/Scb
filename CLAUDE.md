@@ -378,7 +378,29 @@ scbv1/
 
 ---
 
-## 17. Open Threads
+## 17. Security Rules for AI-Generated Apps (compliance checklist)
+
+Every AI-generated change in this repo must clear the 13-point checklist from Taha Jaffri's "Security Rules for AI-Generated Apps". Current status per rule:
+
+1. **Secrets in env only** — ✅ `.env` gitignored. ⚠️ `REACT_APP_DATA_KEY` inlined in JS bundle by CRA (free-tier limit; mitigated by admin-only Firestore reads in Phase A rules so the bundle key alone is useless to attackers).
+2. **Rate limiting** — ❌ None today. Firebase App Check + reCAPTCHA v3 is the free-tier fix; integrate when ready. Anonymous registration writes are the exposed surface.
+3. **Input validation** — ✅ Client-side `validateRegistrationForm` + server-side Firestore rules (`hasEncryptedShape`, `isValidEventRef`, `eventIsActive`). No Zod yet; add when introducing complex form shapes.
+4. **Auth** — ✅ Firebase Auth (bcrypt handled internally) + `/users` allowlist (invite-only). JWTs in httpOnly cookies via SDK. ⚠️ Lockout policy not custom-tuned — Firebase has defaults.
+5. **SQL / DB** — ✅ Firestore (NoSQL); no SQL injection surface. Firebase SDK used everywhere; no raw queries.
+6. **CORS** — ✅ Firestore SDK + Vercel default (same-origin). No wildcards.
+7. **HTTP headers** — ✅ `vercel.json` sets X-Content-Type-Options, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, Strict-Transport-Security (HSTS), Content-Security-Policy.
+8. **File uploads** — ✅ No upload feature in this app.
+9. **Error handling** — ⚠️ Generic messages to user. Console-only logs. No Sentry yet.
+10. **Dependency security** — ⚠️ `yarn.lock` pinned. `yarn audit` shows 161 vulns — ALL in `react-scripts` transitive dev tooling (Jest, webpack-dev-server); none ship to client. Production deps (firebase, qrcode, lucide-react, recharts) clean. Re-audit on every dep change.
+11. **XSS** — ✅ Zero `dangerouslySetInnerHTML`. React escapes by default. No `eval` or `new Function`.
+12. **Deploy gate** — ✅ .env gitignored, HTTPS enforced, debug off, CORS default, ❌ rate limit pending (rule 2).
+13. **AI / LLM rules** — ✅ N/A. No LLM in data path.
+
+Future AI edits to this codebase must keep every ✅ line ✅ and improve ⚠️/❌ lines toward ✅. If a rule changes status, update this section in the same commit.
+
+---
+
+## 18. Open Threads
 
 - [ ] Push `codex/setup-onboarding` to `shashankgowda7755/scbv1` (blocked on git auth).
 - [ ] Promote latest local-built Vercel deploy to `scbv1-ehbx.vercel.app` alias (blocked on Vercel BLOCKED state).
