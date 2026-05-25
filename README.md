@@ -12,7 +12,6 @@ scbv1/
 │   ├── src/lib/event-store.js  # Firestore/local demo data layer
 │   ├── public/index.html       # Client-facing shell and CSP
 │   └── vercel.json             # Static Vercel deployment config
-├── frontend/api/               # Legacy FastAPI proof-of-concept, no longer primary
 └── README.md
 ```
 
@@ -82,4 +81,4 @@ Once these are present, the app switches from demo mode to real Firestore mode a
 
 ## Deployment
 
-Deploy the `frontend/` app as a static Vercel project or serve the built output from the client-approved domain. The current implementation no longer depends on the old FastAPI endpoint for the main flow.
+Deploy the `frontend/` app as a static Vercel project or serve the built output from the client-approved domain.

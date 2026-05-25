@@ -374,7 +374,7 @@ scbv1/
 - Masked previews stored in clear are deterministic (no plaintext leakage).
 - Each registration carries `expiresAt` (Firestore TTL-ready).
 - Duplicate prevention is per-event, driven by `duplicateField` choice.
-- Old Railway / Mongo backend in `frontend/api/` is dead code — kept only for reference.
+- Old Railway / Mongo backend (`frontend/api/`) has been removed. Repo is Firebase-only.
 
 ---
 

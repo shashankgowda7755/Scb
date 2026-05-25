@@ -29,6 +29,3 @@ Create `frontend/.env` from `.env.example` and add the Firebase web app values. 
 5. Open the dashboard to show masked live data and export CSV.
 6. Use purge to demonstrate post-event data cleanup.
 
-## Legacy Folder
-
-`frontend/api/` contains the earlier FastAPI + Mongo proof-of-concept. It is kept for reference, but the main SCB demo flow now uses Firebase-oriented client storage.
