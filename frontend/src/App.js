@@ -1042,29 +1042,55 @@ function App() {
     }
   }
 
-  async function handleDeleteEvent() {
-    if (!selectedEvent) {
-      return;
-    }
+  async function handleDeleteEvent(eventArg) {
+    const ev = eventArg || selectedEvent;
+    if (!ev) return;
 
     const shouldDelete = window.confirm(
-      `Delete "${selectedEvent.title}" and all related registrations? This simulates the post-event purge requested by the client.`,
+      `Delete "${ev.title}" and all of its registrations, check-ins, check-outs, and attendance? This cannot be undone.`,
     );
-
-    if (!shouldDelete) {
-      return;
-    }
+    if (!shouldDelete) return;
 
     try {
-      await deleteEvent(selectedEvent.id);
+      await deleteEvent(ev.id);
       setMessage({
         type: "success",
-        text: "Event data purged successfully.",
+        text: `"${ev.title}" deleted along with all related data.`,
       });
     } catch (error) {
       setMessage({
         type: "error",
-        text: "Unable to purge the event right now.",
+        text: "Unable to delete the event right now.",
+      });
+    }
+  }
+
+  async function handleWipeAllEvents() {
+    if (!events.length) return;
+    const confirm1 = window.confirm(
+      `Delete ALL ${events.length} events and every registration / check-in / check-out / attendance record across the platform?\n\nLogin accounts (admin users) are NOT affected.\n\nThis cannot be undone.`,
+    );
+    if (!confirm1) return;
+    const typed = window.prompt('Type "WIPE" to confirm this destructive action.');
+    if (typed !== "WIPE") {
+      setMessage({ type: "error", text: "Wipe cancelled — confirmation text did not match." });
+      return;
+    }
+    setMessage({ type: "", text: "" });
+    try {
+      let count = 0;
+      for (const ev of events) {
+        await deleteEvent(ev.id);
+        count += 1;
+      }
+      setMessage({
+        type: "success",
+        text: `Wiped ${count} events and all related data. Admin logins untouched.`,
+      });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: "Wipe stopped mid-way. Some events may have been deleted. Refresh and try again.",
       });
     }
   }
@@ -2804,6 +2830,11 @@ function App() {
                       Load SCB Demo Event
                     </Button>
                   )}
+                  {events.length > 0 && (
+                    <Button type="button" variant="outline" className="events-wipe-btn" onClick={handleWipeAllEvents} title="Delete every event + every registration + every check-in / check-out / attendance record. Admin logins are NOT touched.">
+                      <Trash2 className="mr-2 h-4 w-4" /> Wipe all data
+                    </Button>
+                  )}
                   <Button type="button" className="cta-button events-toolbar-cta" onClick={startBuilderCreate}>
                     <FilePlus className="mr-2 h-4 w-4" /> New event
                   </Button>
@@ -2880,6 +2911,9 @@ function App() {
                                   </Button>
                                   <Button type="button" variant="outline" size="sm" onClick={() => handleResetEventData(ev)} title="Wipe this event's registrations + check-ins + check-outs; keep the event">
                                     <RefreshCw className="mr-1 h-3.5 w-3.5" /> Reset Data
+                                  </Button>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => handleDeleteEvent(ev)} className="row-delete-btn" title="Delete the event entirely along with its registrations, check-ins, check-outs, attendance">
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" /> Delete
                                   </Button>
                                 </div>
                                 {(() => {

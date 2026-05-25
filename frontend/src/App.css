@@ -1631,3 +1631,18 @@ td {
   .events-toolbar-actions { width: 100%; }
   .events-toolbar-cta { width: 100%; }
 }
+
+/* ---------- Danger / destructive buttons ---------- */
+
+.row-delete-btn,
+.events-wipe-btn {
+  border-color: rgba(220, 38, 38, 0.35) !important;
+  color: #B91C1C !important;
+}
+
+.row-delete-btn:hover:not(:disabled),
+.events-wipe-btn:hover:not(:disabled) {
+  background: #FEF2F2 !important;
+  border-color: rgba(220, 38, 38, 0.6) !important;
+  color: #991B1B !important;
+}
