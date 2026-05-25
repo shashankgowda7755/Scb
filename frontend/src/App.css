@@ -1742,3 +1742,44 @@ td {
   .participant-popup-icon { width: 56px; height: 56px; font-size: 1.6rem; }
   .participant-popup-title { font-size: 1.1rem; }
 }
+
+/* ---------- Form Builder: per-option editor rows ---------- */
+
+.builder-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.builder-option-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.builder-option-marker {
+  text-align: center;
+  font-size: 1rem;
+  color: var(--gray-500);
+  width: 24px;
+}
+
+/* Participant: textarea for paragraph fields */
+
+.gform-textarea {
+  resize: vertical;
+  min-height: 80px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  font-family: inherit;
+  line-height: 1.45;
+}
+
+.gform-textarea:focus {
+  outline: none;
+  border: 1px solid var(--orange);
+  border-bottom-width: 2px;
+}

@@ -78,14 +78,17 @@ const eventDefaults = {
 
 const FIELD_TYPES = [
   { value: "text", label: "Short text" },
+  { value: "longtext", label: "Paragraph" },
   { value: "email", label: "Email" },
   { value: "phone", label: "Phone" },
-  { value: "radio", label: "Yes / No radio" },
+  { value: "radio", label: "Multiple choice (radio)" },
   { value: "dropdown", label: "Dropdown" },
-  { value: "checkbox", label: "Checkbox" },
+  { value: "checkboxes", label: "Checkboxes (multi-select)" },
+  { value: "checkbox", label: "Single checkbox (consent)" },
+  { value: "date", label: "Date" },
 ];
 
-const FIELD_TYPES_WITH_OPTIONS = ["radio", "dropdown"];
+const FIELD_TYPES_WITH_OPTIONS = ["radio", "dropdown", "checkboxes"];
 
 function makeFieldKey(label, existingKeys) {
   const base = String(label || "")
@@ -274,7 +277,8 @@ function validateRegistrationForm(event, formData) {
       v === undefined ||
       v === null ||
       (typeof v === "string" && !v.trim()) ||
-      (fld.type === "checkbox" && v === false);
+      (fld.type === "checkbox" && v === false) ||
+      (fld.type === "checkboxes" && (!Array.isArray(v) || v.length === 0));
     if (fld.required && isEmpty) {
       return `${fld.label} is required.`;
     }
@@ -358,6 +362,7 @@ async function downloadCsv(filename, rows, event) {
         const v = cd[f.key];
         if (v === undefined || v === null) return "";
         if (typeof v === "boolean") return v ? "Yes" : "No";
+        if (Array.isArray(v)) return v.join("; ");
         return v;
       }),
       row.revision,
@@ -1660,9 +1665,16 @@ function App() {
             .map((f) => f.key);
           merged.key = makeFieldKey(patch.label, existingKeys);
         }
-        // Reset options when type changes away from a list-typed field
-        if (patch.type !== undefined && !FIELD_TYPES_WITH_OPTIONS.includes(patch.type)) {
-          merged.options = [];
+        // When type changes, normalize options:
+        //  - Away from list-typed → clear options.
+        //  - Into list-typed → seed with one empty option so the editor row
+        //    shows up immediately (otherwise admin has to also click Add).
+        if (patch.type !== undefined) {
+          if (!FIELD_TYPES_WITH_OPTIONS.includes(patch.type)) {
+            merged.options = [];
+          } else if (!Array.isArray(merged.options) || merged.options.length === 0) {
+            merged.options = [""];
+          }
         }
         return merged;
       });
@@ -1697,8 +1709,14 @@ function App() {
     for (let i = 0; i < f.formFields.length; i += 1) {
       const fld = f.formFields[i];
       if (!fld.label.trim()) return `Field ${i + 1}: label is required.`;
-      if (FIELD_TYPES_WITH_OPTIONS.includes(fld.type) && (!fld.options || fld.options.length === 0)) {
-        return `Field "${fld.label}": add at least one option.`;
+      if (FIELD_TYPES_WITH_OPTIONS.includes(fld.type)) {
+        const cleaned = (fld.options || []).map((s) => String(s).trim()).filter(Boolean);
+        if (cleaned.length === 0) {
+          return `Field "${fld.label}": add at least one option.`;
+        }
+        if (new Set(cleaned.map((s) => s.toLowerCase())).size !== cleaned.length) {
+          return `Field "${fld.label}": duplicate options aren't allowed.`;
+        }
       }
     }
     return null;
@@ -1713,6 +1731,19 @@ function App() {
     }
     setSavingBuilder(true);
     try {
+      // Clean field shape before persisting: trim labels, drop blank options,
+      // ensure options array exists only on list-typed fields.
+      const cleanedFields = builderForm.formFields.map((fld) => {
+        const cleaned = { ...fld, label: String(fld.label || "").trim() };
+        if (FIELD_TYPES_WITH_OPTIONS.includes(fld.type)) {
+          cleaned.options = (fld.options || [])
+            .map((s) => String(s).trim())
+            .filter(Boolean);
+        } else {
+          cleaned.options = [];
+        }
+        return cleaned;
+      });
       const payload = {
         clientName: builderForm.clientName,
         title: builderForm.title,
@@ -1722,7 +1753,7 @@ function App() {
         retentionDays: builderForm.retentionDays,
         description: builderForm.description,
         uniqueIdLabel: builderForm.uniqueIdLabel,
-        formFields: builderForm.formFields,
+        formFields: cleanedFields,
       };
       if (builderMode === "edit" && builderEventId) {
         await updateEvent(builderEventId, payload);
@@ -1906,7 +1937,12 @@ function App() {
             </div>
 
             {customFields.map((fld) => {
-              const v = customData[fld.key] ?? (fld.type === "checkbox" ? false : "");
+              const defaultEmpty = fld.type === "checkbox"
+                ? false
+                : fld.type === "checkboxes"
+                  ? []
+                  : "";
+              const v = customData[fld.key] ?? defaultEmpty;
               const inputId = `p-custom-${fld.key}`;
               const star = fld.required ? <span className="gform-star">*</span> : null;
               return (
@@ -1915,15 +1951,21 @@ function App() {
                   {fld.type === "text" && (
                     <input id={inputId} className="gform-input" placeholder="Your answer" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
                   )}
+                  {fld.type === "longtext" && (
+                    <textarea id={inputId} className="gform-input gform-textarea" rows={4} placeholder="Your answer" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
+                  )}
                   {fld.type === "email" && (
                     <input id={inputId} type="email" className="gform-input" placeholder="name@example.com" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
                   )}
                   {fld.type === "phone" && (
                     <input id={inputId} type="tel" className="gform-input" placeholder="+91 98765 43210" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
                   )}
+                  {fld.type === "date" && (
+                    <input id={inputId} type="date" className="gform-input" value={v} onChange={(e) => setCustom(fld.key, e.target.value)} />
+                  )}
                   {fld.type === "radio" && (
                     <div className="gform-radio-group">
-                      {(fld.options && fld.options.length ? fld.options : ["Yes", "No"]).map((opt) => (
+                      {(fld.options && fld.options.length ? fld.options : ["Option 1", "Option 2"]).map((opt) => (
                         <label key={opt} className="gform-radio">
                           <input type="radio" name={`custom-${fld.key}`} value={opt} checked={v === opt} onChange={() => setCustom(fld.key, opt)} />
                           <span>{opt}</span>
@@ -1938,6 +1980,29 @@ function App() {
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
                     </select>
+                  )}
+                  {fld.type === "checkboxes" && (
+                    <div className="gform-radio-group">
+                      {(fld.options && fld.options.length ? fld.options : ["Option 1"]).map((opt) => {
+                        const selected = Array.isArray(v) ? v : [];
+                        const checked = selected.includes(opt);
+                        return (
+                          <label key={opt} className="gform-radio">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = e.target.checked
+                                  ? [...selected, opt]
+                                  : selected.filter((x) => x !== opt);
+                                setCustom(fld.key, next);
+                              }}
+                            />
+                            <span>{opt}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
                   )}
                   {fld.type === "checkbox" && (
                     <label className="gform-radio">
@@ -2572,15 +2637,55 @@ function App() {
 
                             {FIELD_TYPES_WITH_OPTIONS.includes(field.type) && (
                               <div className="space-y-2">
-                                <Label className="builder-field-sub-label">Options (one per line)</Label>
-                                <Textarea
-                                  rows={3}
-                                  value={(field.options || []).join("\n")}
-                                  onChange={(e) => updateBuilderCustomField(idx, {
-                                    options: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean),
-                                  })}
-                                  placeholder={field.type === "radio" ? "Yes\nNo" : "Option A\nOption B\nOption C"}
-                                />
+                                <Label className="builder-field-sub-label">
+                                  Options ({field.type === "checkboxes" ? "participant can pick more than one" : "participant picks one"})
+                                </Label>
+                                <div className="builder-option-list">
+                                  {(field.options && field.options.length ? field.options : [""]).map((opt, optIdx) => (
+                                    <div className="builder-option-row" key={optIdx}>
+                                      <span className="builder-option-marker">
+                                        {field.type === "checkboxes"
+                                          ? "☐"
+                                          : field.type === "radio"
+                                            ? "○"
+                                            : "▼"}
+                                      </span>
+                                      <Input
+                                        value={opt}
+                                        placeholder={`Option ${optIdx + 1}`}
+                                        onChange={(e) => {
+                                          const nextOpts = [...(field.options || [""])];
+                                          nextOpts[optIdx] = e.target.value;
+                                          updateBuilderCustomField(idx, { options: nextOpts });
+                                        }}
+                                      />
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                          const nextOpts = (field.options || []).filter((_, i) => i !== optIdx);
+                                          updateBuilderCustomField(idx, { options: nextOpts });
+                                        }}
+                                        disabled={(field.options || []).length <= 1}
+                                        title="Remove this option"
+                                      >
+                                        ✕
+                                      </Button>
+                                    </div>
+                                  ))}
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    const nextOpts = [...(field.options || []), ""];
+                                    updateBuilderCustomField(idx, { options: nextOpts });
+                                  }}
+                                >
+                                  + Add option
+                                </Button>
                               </div>
                             )}
 

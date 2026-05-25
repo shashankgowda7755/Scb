@@ -186,7 +186,15 @@ async function buildRegistrationRecord(event, formData, previousRecord) {
   for (const [k, v] of Object.entries(customDataPlain)) {
     if (typeof v === "string") {
       customDataCipher[k] = await encryptString(normalizeString(v));
+    } else if (Array.isArray(v)) {
+      // Multi-select checkbox values. Serialize the array so the encrypt path
+      // sees a single string; decrypt path parses back to array.
+      customDataCipher[k] = await encryptString(
+        JSON.stringify(v.map((x) => String(x))),
+      );
     } else {
+      // booleans (single checkbox) and numbers stay clear; they leak nothing
+      // PII-shaped and admins can iterate the map cheaply.
       customDataCipher[k] = v;
     }
   }
@@ -258,7 +266,19 @@ export async function decryptRegistration(record) {
     for (const [k, v] of Object.entries(record.customData)) {
       if (typeof v === "string") {
         try {
-          out[k] = await decryptString(v);
+          const plain = await decryptString(v);
+          // Multi-select checkbox values were stored as JSON-stringified arrays.
+          // Detect the leading `[` and parse back so the UI sees an array.
+          if (plain && plain.startsWith("[")) {
+            try {
+              const parsed = JSON.parse(plain);
+              out[k] = Array.isArray(parsed) ? parsed : plain;
+            } catch {
+              out[k] = plain;
+            }
+          } else {
+            out[k] = plain;
+          }
         } catch (error) {
           out[k] = "[decrypt failed]";
         }
