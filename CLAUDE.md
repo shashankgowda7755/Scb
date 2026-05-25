@@ -1,48 +1,51 @@
 # SCB Event Platform — Project Memory
 
-Single source of truth for this repo. Read this first whenever resuming work.
+Single source of truth for this repo. Read first whenever resuming work.
 
 ---
 
 ## 1. Project Overview
 
-**Product:** Event registration + attendance platform for Standard Chartered Bank (SCB) internal CSR events.
+**Product:** Event registration + attendance + reports platform for Standard Chartered Bank internal CSR events.
 
-**Built by:** Communitree (Shashank Gowda, shashank@tndwwt.org).
+**Owner:** Shashank Gowda (`shashank@tndwwt.org`), Communitree.
+**Repo:** `https://github.com/shashankgowda7755/Scb` · `main`
+**Production:** `https://scbv1-eight.vercel.app`
+**First event:** `CSR Activity Chennai — Quiz Calendar Creation` · 09 May 2026 · DLF Downtown.
 
-**First event:** `CSR Activity Chennai - Quiz Calendar Creation` · 09 May 2026 · DLF Downtown.
-
-**Client meeting:** 12:00 IST. Audience: Pinaki + Eswar (SCB), Mohan / Roshney / Das (Communitree).
-
-**Why this exists (from the call transcript):**
+**Why this exists (from the client call):**
 - SCB compliance forbids personal data leaving the Google ecosystem.
-- Existing Google Form + Sheet workflow lacks: duplicate prevention, live ops dashboard, automated retention purge.
+- The existing Google Form + Sheet workflow lacks: duplicate prevention, live ops dashboard, automated retention purge.
 - Communitree closes those three gaps without leaving the Google data path.
 
 ---
 
-## 2. Current State
+## 2. Current State (ship-ready)
 
-### Working (V1, ready for the 12 PM demo)
-- Real Firebase project `scb-event-registration` live in Mumbai region.
-- Field-level AES-256-GCM encryption on `fullName`, `employeeId`, `email`, `phone`. Operator holds the key.
-- Sidebar shell with 9 nav items (5 working + 4 stub pages).
-- Event creation, QR generation, participant registration, live count, masked dashboard, CSV export with on-the-fly decrypt, manual purge, key rotation demo.
-- Participant view at `?mode=register` (clean form, no admin chrome).
-- Firestore rules shape-validate writes (rejects non-ciphertext shapes).
-- Firestore TTL on `expiresAt` for automatic retention purge.
+### Live + working
+- Firebase project `scb-event-registration` in `asia-south1` (Mumbai), Spark plan.
+- Admin sign-in (Firebase Auth + `/users` allowlist, invite-only, no self-signup).
+- Form Builder (no-code) per event — 9 field types matching Google Forms parity.
+- Dynamic participant view (`?mode=register` / `checkin` / `checkout`) renders from `event.formFields`.
+- Field-level AES-256-GCM encryption on every PII field before Firestore write.
+- Phase A Firestore rules **DEPLOYED**: admin-only reads on `/registrations`, `/checkins`, `/checkouts`, `/attendance`. Public reads on `/events` only (so QR can resolve event id).
+- Phase D field expansion: `customData[*]`, `department`, `city`, `notes` all encrypted.
+- Per-event activate / deactivate + per-form gates (Reg / Check-In / Checkout ON/OFF).
+- Inactive event = cascaded form pills + participant lockout.
+- Per-row Delete + toolbar Wipe All Data (with double confirm + typed WIPE).
+- Check-in + Checkout with walk-in capture + duplicate guards.
+- Attendance status engine (8 codes) — `COMPLETE / REG_CHECKIN / REG_ONLY / REG_CHECKOUT / WALKIN_COMPLETE / WALKIN_CHECKIN / WALKIN_CHECKOUT / NO_SHOW`.
+- Reports tab — summary + status breakdown + filter + CSV + PDF.
+- Full-screen success popup after every participant submit, with warnings for "no check-in" / "not registered" paths.
+- Vercel security headers: HSTS, CSP, X-Frame-Options DENY, Permissions-Policy.
+- `PROOF.html` standalone encryption demo at `/PROOF.html` for client walkthrough.
 
-### V2 backend wired in `lib/event-store.js` (UI pages still stubbed)
-- **Form Builder** — no-code per-event form editor. UI = stub.
-- **Check-In** — `saveCheckIn({ event, uniqueId, fullName })`. Lookups via `lookupRegistration`. Walk-in capture supported. Duplicate guard. UI = stub.
-- **Checkout** — `saveCheckOut({ event, uniqueId, fullName })`. Status branches: complete / reg-checkout-no-checkin / walkin-complete / walkin-checkout. UI = stub.
-- **Attendance engine** — `classifyAttendance({ registration, checkIn, checkOut })` returns one of 8 codes. `computeAttendance(eventId)` rolls up + persists `/attendance/{id}` docs. Auto-runs on `closeEvent(id)`.
-- **Event lifecycle** — `setEventStatus(eventId, "active" | "closed")`, `closeEvent`, `reopenEvent`. Rules block writes to closed events.
-- **Reports** — backend ready (data in `/attendance`). UI = stub.
+### Manual gates remaining
+- Firestore TTL × 4 collections (`registrations`, `checkins`, `checkouts`, `attendance`) needs Console click-through (gcloud blocked on billing without Blaze). Without TTL, manual `Purge Event` still works.
 
-### Blocked
-- **GitHub push** — local git auth is `artforawarenessofficial-blip`, no write perm on `shashankgowda7755/scbv1`. Branch `codex/setup-onboarding` has 1 unpushed commit.
-- **Vercel deploys** — 3 deployments stuck in `BLOCKED` state (hobby tier daily limit). Demo runs from `localhost:3000`. Push to GitHub when shashankgowda creds available — Vercel auto-builds from `main`.
+### Free-tier limits (mitigated, not eliminated)
+- AES master key inlined into JS bundle (`REACT_APP_DATA_KEY`). Mitigated by Phase A rules: key alone can't read Firestore without admin auth.
+- No Cloud Function envelope / KMS / audit log (needs Blaze).
 
 ---
 
@@ -50,15 +53,16 @@ Single source of truth for this repo. Read this first whenever resuming work.
 
 | Layer | Choice |
 |---|---|
-| Frontend | React 19, CRA + craco, TailwindCSS, shadcn/ui, Lucide icons |
+| Frontend | React 19 (CRA + craco), TailwindCSS, shadcn/ui, Lucide icons |
 | QR | `qrcode` npm package |
-| Storage | Cloud Firestore, `asia-south1` (Mumbai) |
-| Encryption | Web Crypto API (`crypto.subtle`) — no third-party crypto lib |
+| Storage | Cloud Firestore, `asia-south1` (Mumbai), Spark plan |
+| Encryption | Web Crypto API (`crypto.subtle`) — no third-party crypto library |
 | Realtime | Firestore `onSnapshot` |
 | Hosting | Vercel static deploy |
+| Auth | Firebase Auth (email + password, invite-only via `/users` allowlist) |
 | Local fallback | `localStorage` when Firebase env vars missing |
 
-No third-party SaaS in the data path. Stack is React in browser + Firestore on Google Cloud + Vercel static hosting.
+No third-party SaaS in the data path. React in browser + Firestore on Google Cloud + Vercel for static hosting.
 
 ---
 
@@ -70,25 +74,21 @@ No third-party SaaS in the data path. Stack is React in browser + Firestore on G
 | `--ink` | `#0A0A0A` | Primary text, default CTA |
 | `--paper` | `#FFFFFF` | All backgrounds |
 | `--orange` | `#FF6B1A` | Accent, hover CTA, primary action buttons |
-| `--orange-soft` | `#FFF1E8` | Status pill bg, helper banner, soft chip bg |
-| `--orange-deep` | `#E5570A` | Accent text on soft bg, CTA hover |
+| `--orange-soft` | `#FFF1E8` | Status pill, helper banner, soft chip |
+| `--orange-deep` | `#E5570A` | CTA hover, accent text |
 | `--gray-200` | `#E5E5E5` | Borders |
 | `--gray-500` | `#71717A` | Secondary text |
-| `--gray-700` | `#3F3F46` | Labels |
+
+CSS file: `frontend/src/App.css`. Tokens in `:root`.
 
 ### Layout
 - 248px fixed left sidebar + flex-grow main.
-- Single-column page stack (no 2-col grids — each page does one job).
-- Cards: white bg + 1px gray border + subtle hover (border darkens).
-- Buttons: black default → orange on hover (with lift); orange for primary actions on insight pages.
-- Inputs: white bg, orange focus ring `rgba(255,107,26,0.18)`.
-
-### Typography
-- Display: 1.5rem H1, 1.05rem card titles, -0.02em letter-spacing on headings.
-- Body: 0.88-0.95rem, line-height 1.5.
-- Code/mono: ui-monospace, SF Mono.
-
-CSS file: `frontend/src/App.css`. Tokens are declared at `:root`.
+- Single-column page stacks (no 2-col grids).
+- Card: white bg + 1px gray border + subtle hover.
+- CTA: black default → orange on hover, with lift.
+- Inputs: white bg, orange focus ring.
+- Participant view: Google-Form-style with orange top stripe, centered card, ≤640 px width.
+- Full-screen success popup: tone-aware (green good / orange warn / blue info) with big icon + title + body + timestamp.
 
 ---
 
@@ -97,67 +97,101 @@ CSS file: `frontend/src/App.css`. Tokens are declared at `:root`.
 ```
 SCB Event Platform
 └── Setup
-    ├── Events ✓             (Create Event form)
-    └── Form Builder (Soon)
+    ├── Events            (list + delete + wipe all)
+    └── Form Builder      (no-code form designer)
 └── Operate
-    ├── Registrations ✓      (Capture Registration form)
-    ├── Check-In (Soon)
-    ├── Checkout (Soon)
-    └── QR & Share ✓         (QR code + share link, full page)
+    ├── Registrations     (operator manual entry)
+    ├── Check-In          (venue desk)
+    ├── Checkout
+    └── QR & Share        (QR code + share link + open participant)
 └── Insights
-    ├── Dashboard ✓          (Live summary + Export/Reveal/Purge + table)
-    └── Reports (Soon)
+    ├── Dashboard         (live counters + masked table + Reveal + CSV)
+    └── Reports           (summary + status breakdown + CSV + PDF)
 └── Trust
-    └── Security ✓           (Encryption narrative + key fingerprint + rotate)
+    ├── Security          (encryption narrative + key fingerprint + rotate)
+    └── Admin Users       (invite-only allowlist management)
 ```
 
-`navSections` array in `App.js` is the single source of truth. To add a new page: push an item, add a `<TabsContent value="X">` block.
+To add a new page: push an item to `navSections` + add a `<TabsContent value="X">` block. `App.js` is the single source of truth.
 
 ---
 
-## 6. Data Flow (V1)
+## 6. Form Builder — 9 field types (Google Forms parity)
+
+| Type key | Renders on participant | Storage | Notes |
+|---|---|---|---|
+| `text` | `<input>` | string (encrypted) | |
+| `longtext` | `<textarea rows=4>` | string (encrypted) | Paragraph answers |
+| `email` | `<input type=email>` | string (encrypted) | Format validated when filled |
+| `phone` | `<input type=tel>` | string (encrypted) | Format validated when filled |
+| `radio` | N radios | string (encrypted) | Admin sets N options |
+| `dropdown` | `<select>` | string (encrypted) | Admin sets N options |
+| `checkboxes` | N checkboxes (multi-select) | **array** (JSON encrypted) | Each value in array |
+| `checkbox` | One Yes checkbox | bool (clear) | Consent-style |
+| `date` | `<input type=date>` | string (encrypted) | |
+
+Always-on fields (cannot remove): Full Name, Bank ID (label renamable per event), Photo Consent.
+
+Options editor: per-option rows with marker (○ / ▼ / ☐) + Add / Remove. Switching type to a list-typed kind auto-seeds one empty option row. Save strips blank options + rejects duplicates (case-insensitive).
+
+CSV column for a `checkboxes` field renders as `Option A; Option B`.
+
+---
+
+## 7. Data Flow (V1)
 
 ```
-1. Operator → Events page → fills Create Event form → submit.
-2. App generates eventId + QR encoding URL:
-     https://<deploy>/?event=<id>&mode=register#register
-3. Operator auto-routed to QR & Share page.
+1. Operator → Form Builder → New Event → save.
+2. App generates eventId + QR URL:
+     https://<deploy>/?event=<id>&mode=register
+3. Operator auto-routes to QR & Share.
 4. Employee scans QR on phone → participant view loads (clean, no admin).
-5. Employee fills Full Name + Bank ID + Participation + Photo Consent → submit.
-6. Browser: AES-256-GCM encrypts (fullName, employeeId, email, phone).
+5. Employee fills dynamic form (built from event.formFields).
+6. Browser: AES-256-GCM encrypts fullName / employeeId / email / phone /
+   department / city / notes / customData[*] string values.
    Bank ID is SHA-256 hashed with per-event salt → Firestore docId.
 7. Encrypted record written to /registrations/{eventId}__{hash}.
-8. Dashboard page (Firestore onSnapshot) ticks count up live.
-9. Operator clicks Reveal → in-browser decrypt → plaintext.
-10. CSV Export → decrypt → download.
-11. Manual Purge OR Firestore TTL on expiresAt removes records.
+8. Full-screen popup confirms outcome (green / orange / blue).
+9. Operator dashboard (Firestore onSnapshot) reflects count live.
+10. Operator sees masked previews by default. Click Reveal → in-browser
+    decrypt → plaintext renders.
+11. CSV Export → in-browser decrypt → file downloads with all custom
+    columns + Phase D fields.
+12. Check-in / Checkout flows mirror the same encrypt-write path.
+13. computeAttendance(eventId) auto-runs as registrations / checkins /
+    checkouts change → joins by dedupeHash → writes /attendance docs.
+14. closeEvent(eventId) finalizes attendance + auto-runs computeAttendance.
+15. Manual Purge Event OR Firestore TTL on expiresAt cleans up after
+    retention window.
 ```
 
 ---
 
-## 7. Encryption Details
+## 8. Encryption Details
 
 - Cipher: AES-GCM, 256-bit key, 96-bit IV per record.
-- Key source order: `REACT_APP_DATA_KEY` env var → `SCB_DATA_KEY_V1` localStorage (auto-generated on first run).
-- Key fingerprint: `kid-<6 hex>` = first 6 bytes of SHA-256(key). Safe to share.
-- Rotation: `Rotate Key (Demo)` button. Prior records become `[decrypt failed]`. Proof "data useless without key".
-- Encrypted fields stored as: `enc:v1:<base64-iv>.<base64-ciphertext>`.
-- Dedupe: `docId = ${eventId}__${sha256(${eventId}::${normalize(bankId)}).slice(0, 24)}` — server never sees plain ID.
+- Key source order: `REACT_APP_DATA_KEY` env var → `SCB_DATA_KEY_V1` localStorage (auto-generated if missing).
+- Key fingerprint: `kid-<6 hex>` = SHA-256(key)[:6]. Safe to share — identifies the key without revealing it.
+- Stored shape: `enc:v1:<base64-iv>.<base64-ciphertext>`.
+- Rotation: `Rotate Key (Demo)` in Security tab. Prior records become `[decrypt failed]` (no historic re-encrypt on free tier).
+- Dedupe: `docId = ${eventId}__${sha256(${eventId}::${normalize(bankId)}).slice(0,24)}`. Server never sees plain Bank ID.
 
-Code: `frontend/src/lib/crypto.js`.
+### Encrypted fields per collection
 
-### V2 — `checkins` / `checkouts` / `attendance` also encrypt PII
+**`/registrations`** — `fullName`, `employeeId`, `email`, `phone`, `department`, `city`, `notes`, every string in `customData{}`. Arrays in `customData{}` (checkboxes) are JSON-stringified before encrypt, parsed back on decrypt. Booleans in `customData{}` stay clear (consent-style).
+**`/checkins`** + **`/checkouts`** — `uniqueId`, `fullName`.
+**`/attendance`** — `uniqueId`, `fullName` (rolled up from the source).
 
-- `checkins/{eventId__hash}` and `checkouts/{eventId__hash}` store `uniqueId` and `fullName` as `enc:v1:...` ciphertext.
-- `attendance/{eventId__hash}` rolls up timestamps + status + the same encrypted fields.
-- Status codes (Module 6 of the spec):
-  `COMPLETE | REG_CHECKIN | REG_ONLY | REG_CHECKOUT | WALKIN_COMPLETE | WALKIN_CHECKIN | WALKIN_CHECKOUT | NO_SHOW`
-  Implemented in `classifyAttendance()`; mapped to human labels via `STATUS_LABEL`.
-- `computeAttendance(eventId)` joins all 3 logs by `dedupeHash`, persists rows to `/attendance`, and removes stale rows.
+Clear-text fields: `eventId`, `eventTitle`, `clientName`, `participation` ("Yes"/"No"), `photoConsent` (bool), `consent` (bool), `dedupeHash`, masked previews (`maskedFullName`, `maskedEmail`, …), `expiresAt`, timestamps, `revision`.
+
+Code: `frontend/src/lib/crypto.js`, `frontend/src/lib/event-store.js`.
 
 ---
 
-## 8. Data Model
+## 9. Data Model
+
+### Collections
+`events`, `registrations`, `checkins`, `checkouts`, `attendance`, `users`.
 
 ### `events/{eventId}`
 ```
@@ -165,37 +199,39 @@ Code: `frontend/src/lib/crypto.js`.
   id, clientName, title, location, eventDate,
   duplicateField: "employeeId" | "email" | "phone",
   retentionDays: number,
-  notes, status: "active",
-  createdAt: Timestamp, expiresAt: Timestamp
+  notes,
+  status: "active" | "closed",
+  registrationEnabled, checkInEnabled, checkOutEnabled: bool,
+  description: "welcome paragraphs",
+  uniqueIdLabel: "Bank ID" | "Employee ID" | ... ,
+  formFields: [{ key, label, type, required, options[] }],
+  createdAt, expiresAt
 }
 ```
 
-### Collections (V2)
-
-`events`, `registrations`, `checkins`, `checkouts`, `attendance` — all in Firestore. All cascade-delete on `deleteEvent(id)`. All carry `expiresAt` for Firestore TTL.
-
-### `registrations/{eventId}__{sha256-hash}`
+### `registrations/{eventId}__{sha256hash}`
 ```
 {
-  id, eventId, eventTitle, clientName,
-  duplicateField, dedupeHash,
-  fullName:    "enc:v1:<iv>.<ct>",   // encrypted
-  employeeId:  "enc:v1:<iv>.<ct>",   // encrypted
-  email:       "enc:v1:<iv>.<ct>",   // encrypted (may be "" if blank)
-  phone:       "enc:v1:<iv>.<ct>",   // encrypted (may be "" if blank)
-  department, city,                  // clear
-  participation: "Yes" | "No",       // clear
-  photoConsent: bool,
-  consent: bool,
+  eventId, eventTitle, clientName, dedupeHash,
+  fullName, employeeId, email, phone:   "enc:v1:...",
+  department, city, notes:              "enc:v1:...",
+  customData: { fieldKey: "enc:v1:..." | bool | <JSON-encrypted array> },
+  participation: "Yes" | "No",
+  photoConsent, consent: bool,
   maskedFullName, maskedEmail, maskedPhone, maskedEmployeeId,
-  createdAt, updatedAt, expiresAt,
-  revision, history: [...]
+  createdAt, updatedAt, expiresAt, revision, history[]
 }
 ```
+
+### `checkins` / `checkouts` / `attendance`
+Per spec §6-8 in earlier message. `walkInFlag`, `statusCode`, masked previews, `checkInTime` / `checkOutTime` / `computedAt`.
+
+### `users/{firebaseAuthUid}`
+Admin allowlist mirror. Email + role.
 
 ---
 
-## 9. Firebase Project
+## 10. Firebase Project
 
 | Item | Value |
 |---|---|
@@ -206,28 +242,28 @@ Code: `frontend/src/lib/crypto.js`.
 | Web App ID | `1:730938451394:web:3cfb2a87566bf5224f625b` |
 | Firestore region | `asia-south1` (Mumbai) |
 | Plan | Spark (free) |
-| Owner | shashankgowda7755 Google account |
+| Owner Google account | `artforawareness.official@gmail.com` |
 
 Rules + indexes + TTL config: `firestore.rules`, `firestore.indexes.json`, `firebase.json` at repo root.
 
 ---
 
-## 10. Vercel Project
+## 11. Vercel Project
 
 | Item | Value |
 |---|---|
-| Project | `scbv1-ehbx` |
+| Project | `scbv1` |
 | Team | `shashankgowda7755-5023s-projects` |
-| Production URL (latest READY) | `https://scbv1-ehbx.vercel.app` (points to 53-day-old deploy) |
-| Latest local-built deploy URL | `scbv1-ehbx-a5y94u5jp-...vercel.app` (BLOCKED) |
-| GitHub link | `shashankgowda7755/scbv1` `main` branch (auto-deploy) |
-| All 7 envs set | yes: `REACT_APP_FIREBASE_*` + `REACT_APP_DATA_KEY` |
+| Production URL | `https://scbv1-eight.vercel.app` |
+| GitHub link | `shashankgowda7755/Scb` `main` branch (auto-deploy on push) |
+| Env vars set | `REACT_APP_FIREBASE_*` × 6 + `REACT_APP_DATA_KEY` |
+| Project root | `frontend` (deploys must run from `/Users/mukesh/scbv1`, not `frontend/`) |
 
-To unblock prod deploy: push current branch via shashankgowda7755 GitHub creds, or wait for Vercel daily limit reset.
+Deploy command: `cd /Users/mukesh/scbv1 && vercel --prod --yes`.
 
 ---
 
-## 11. Environment Variables (frontend/.env)
+## 12. Environment Variables (frontend/.env)
 
 ```
 REACT_APP_FIREBASE_API_KEY=AIzaSyCof00j3wvL5fqfycO0gEGmKP5y4AjxgjI
@@ -236,71 +272,80 @@ REACT_APP_FIREBASE_PROJECT_ID=scb-event-registration
 REACT_APP_FIREBASE_STORAGE_BUCKET=scb-event-registration.firebasestorage.app
 REACT_APP_FIREBASE_MESSAGING_SENDER_ID=730938451394
 REACT_APP_FIREBASE_APP_ID=1:730938451394:web:3cfb2a87566bf5224f625b
-REACT_APP_DATA_KEY=SgLu4PZYORSHPxzYdGPAyGN6VLNViW9+Qz4Ey42OLl4=
+REACT_APP_DATA_KEY=<32-byte base64 key>
 ```
 
-> The `.env` file is in `.gitignore`. Same values are set as Vercel production env vars.
-> The `REACT_APP_DATA_KEY` is the operator AES key. Without it, encrypted records cannot be decrypted. Stash a backup copy in 1Password or wherever the team keeps secrets.
+`.env` is gitignored. Same values are set as Vercel production env vars. Losing `REACT_APP_DATA_KEY` = all encrypted records become permanently unreadable. Stash a backup.
 
 ---
 
-## 12. Build / Run / Test
+## 13. Build / Run / Test
 
 ```bash
 # Install
 cd frontend && npm exec --yes yarn@1.22.22 -- install
 
-# Dev server (default port 3000)
-cd frontend && yarn start
+# Dev server
+cd frontend && yarn start              # http://localhost:3000
 
 # Production build
 cd frontend && yarn build
 
-# Vercel build (uses .vercel/project.json)
-cd frontend && vercel build --prod && vercel deploy --prebuilt --prod --yes
+# Deploy to Vercel production
+cd /Users/mukesh/scbv1 && vercel --prod --yes
+
+# Audit deps
+cd frontend && yarn audit
 ```
 
-Manual smoke test path:
-1. Open `localhost:3000` → Events page.
-2. Click `Load SCB Demo Event` if no events exist, or fill the Create Event form and submit.
-3. Auto-routes to QR & Share. Scan QR with phone (or click `Open participant view in a new tab →`).
-4. Submit a registration. Check Registrations / Dashboard pages — count ticks up.
-5. Dashboard → click Reveal (Decrypt) → plaintext shows.
-6. Dashboard → Export CSV → file downloads with decrypted data.
-7. Submit same Bank ID again → duplicate modal.
-8. Security page → Rotate Key (Demo) → prior records show `[decrypt failed]`.
-9. Dashboard → Purge Event → count drops to zero, Firestore cleared.
+### Smoke path
+1. `localhost:3000` → admin sign in.
+2. Form Builder → New event with description + custom Department field + Checkboxes "Interests" field.
+3. Save → auto-route to QR & Share.
+4. Scan QR on phone → submit registration with multi-select checkboxes.
+5. Dashboard count ticks up. Default view shows masked previews.
+6. Reveal → plaintext renders (decryption in-browser).
+7. CSV export → file contains decrypted plaintext + one column per custom field.
+8. Submit same Bank ID again → duplicate modal with Keep / Update.
+9. Switch to Check-In → enter same Bank ID → green success popup.
+10. Switch to Checkout → enter same Bank ID → green success popup.
+11. Switch to Checkout with an unknown Bank ID → orange warning popup, captured as walk-in.
+12. Reports → see status breakdown + attendee detail table + Export PDF.
+13. Security tab → Rotate Key → prior records show `[decrypt failed]` (free-tier orphan demo).
+14. Events → Delete Event → cascades across all 5 collections.
 
 ---
 
-## 13. File Structure
+## 14. File Structure
 
 ```
 scbv1/
 ├── CLAUDE.md                          # this file
 ├── README.md                          # public-facing project summary
-├── DEMO_SCRIPT.md                     # 12 PM call crib sheet, step-by-step
+├── DEMO_SCRIPT.md                     # 12 PM call crib sheet
 ├── REPORT.md                          # technical report (13 sections)
-├── SLIDES.html                        # self-contained reveal.js deck (open in browser)
-├── TEXT_INVENTORY.md                  # every UI string for client copy review
-├── PRODUCTION_SETUP.md                # operator runbook for Firebase + Vercel
+├── SLIDES.html                        # self-contained reveal.js deck
+├── TEXT_INVENTORY.md                  # every UI string for copy review
+├── PROOF.html                         # standalone encryption demo
+├── PRODUCTION_SETUP.md                # operator runbook (Firebase + Vercel)
 ├── firebase.json
-├── firestore.rules                    # AES-shape validation on writes
-├── firestore.indexes.json             # TTL config for registrations.expiresAt
+├── firestore.rules                    # Phase A: admin-only reads
+├── firestore.indexes.json             # TTL config for *.expiresAt
 └── frontend/
-    ├── .env                           # gitignored — real Firebase + key values
+    ├── .env                           # gitignored — real Firebase + key
     ├── .env.example                   # template
-    ├── vercel.json                    # SPA rewrites + security headers
+    ├── vercel.json                    # rewrites + CSP/HSTS/security headers
     ├── package.json
     ├── src/
-    │   ├── App.js                     # sidebar shell + 9 TabsContent blocks
-    │   ├── App.css                    # white/black/orange design tokens + layout
+    │   ├── App.js                     # ~3700 lines: sidebar shell + 11 TabsContent + participant routes + popup
+    │   ├── App.css                    # white/black/orange design system
     │   ├── index.js
     │   ├── components/ui/             # shadcn primitives
     │   └── lib/
-    │       ├── firebase.js            # Firestore bootstrap + demo mode detection
-    │       ├── event-store.js         # CRUD + encryption + dedupe hash
-    │       ├── crypto.js              # AES-256-GCM, fingerprint, rotate
+    │       ├── firebase.js            # Firestore bootstrap + demo mode detect
+    │       ├── auth.js                # signIn / signOut / createAdminUser
+    │       ├── event-store.js         # CRUD + encryption + dedupe + status engine
+    │       ├── crypto.js              # AES-256-GCM + fingerprint + rotate
     │       └── utils.js               # cn() helper
     └── public/
         ├── index.html
@@ -309,106 +354,54 @@ scbv1/
 
 ---
 
-## 14. V2 Roadmap (stub pages have one-liner per item)
+## 15. Hardening Path (post-client-greenlight, needs Blaze)
 
-### Form Builder
-- Pick event → drag fields (text, dropdown, radio, checkbox, date, file).
-- Mark one field as Unique ID.
-- Preview + publish. Generates 3 URLs per event: registration, check-in, checkout.
-- Forms auto-close when event status → Closed.
-
-### Check-In
-- Single-field form for venue desk (tablet/laptop).
-- Lookup on `Event Code` + `Unique ID`.
-- Match → mark `Checked In` + timestamp + name confirmation.
-- No match → walk-in capture with status `Walk-In, Check-In Only`.
-- Duplicate guard: "Already checked in at HH:MM".
-
-### Checkout
-- Lookup against registrations + check-ins for the event.
-- All 3 match → status `COMPLETE`.
-- Registered + checkout no check-in → `REG_CHECKOUT`.
-- Walk-in only at exit → `WALKIN_CHECKOUT`.
-- Triggers attendance status engine on event close.
-
-### Attendance Status Engine (computed at event close)
-| Code | Meaning |
-|---|---|
-| `COMPLETE` | Registered + Checked In + Checked Out |
-| `REG_CHECKIN` | Registered + Checked In, No Checkout |
-| `REG_ONLY` | Registered, No Check-In, No Checkout |
-| `REG_CHECKOUT` | Registered + Checked Out, No Check-In |
-| `WALKIN_COMPLETE` | Not Registered + Checked In + Checked Out |
-| `WALKIN_CHECKIN` | Not Registered + Checked In Only |
-| `WALKIN_CHECKOUT` | Not Registered + Checked Out Only |
-| `NO_SHOW` | Registered, Never Appeared |
-
-### Reports
-- Per-event summary: counts per status code, completion rate.
-- Per-attendee detail table with all timestamps + status. Filter by status.
-- Export: CSV + PDF.
-- Global trend: last 6 events attendance rate.
-- Auto-generated when event status → Closed.
-
-### Roles (V2)
-- **Admin** — creates events, builds forms, views dashboards + reports, exports.
-- **Event Staff** — operates check-in / checkout forms at venue. Read-only attendee list.
-- **Registrant** — fills forms. No login. Identified by Unique ID.
-
----
-
-## 15. Hardening Path (post-client-greenlight)
-
-- **Operator Firebase Auth.** Google sign-in + `request.auth.token.operator == true` custom claim. Lock dashboard reads/writes to staff.
-- **Audit log.** `/audit/{autoId}` records every reveal / decrypt / export / purge action with operator UID and timestamp.
-- **Google Sheet mirror.** Cloud Function on registration create pushes a decrypted row into an SCB-approved Google Sheet.
-- **SSO with the bank.** Firebase Auth supports SAML/OIDC. Operators sign in with SCB credentials.
-- **Per-client branding.** Logo + colors + retention defaults stored in `/settings/{clientId}`.
+- **Cloud Function envelope encryption.** Master key in Google Secret Manager, browser never holds it. Decrypt only via authenticated callable.
+- **Audit log.** `/audit/{autoId}` records reveal / decrypt / export / purge with operator UID + timestamp.
+- **Re-encrypt on rotate.** Cloud Function reads every record, decrypts with old key, re-encrypts with new — no orphans.
+- **Google Sheet mirror.** Cloud Function trigger on registration create → push decrypted row into SCB-approved Sheet.
+- **Firebase App Check + reCAPTCHA v3.** Rate-limit anonymous registration writes (free tier).
+- **Sentry hobby tier.** Browser error monitoring (free, 20-min wire-up).
+- **SSO with the bank.** Firebase Auth supports SAML/OIDC.
 
 ---
 
 ## 16. Conventions
 
-- Frontend imports use the `@` alias for `frontend/src`.
-- Sensitive fields are encrypted at the source — never logged, never sent in URLs.
-- Masked previews stored in clear are deterministic (no plaintext leakage).
-- Each registration carries `expiresAt` (Firestore TTL-ready).
-- Duplicate prevention is per-event, driven by `duplicateField` choice.
-- Old Railway / Mongo backend (`frontend/api/`) has been removed. Repo is Firebase-only.
+- Frontend imports use `@` alias for `frontend/src`.
+- Sensitive fields encrypted at the source — never logged, never sent in URLs.
+- Masked previews are deterministic — no plaintext leakage.
+- Every record carries `expiresAt` for Firestore TTL.
+- Duplicate prevention is per-event, driven by `event.duplicateField`.
+- Participant-facing copy: NO words "encrypted" / "masked" / security jargon. Operator-facing copy: precise terms (Reveal / Decrypt / Encrypted Fields / etc).
 
 ---
 
-## 17. Security Rules for AI-Generated Apps (compliance checklist)
+## 17. Security Rules for AI-Generated Apps (Taha Jaffri's 13-rule checklist)
 
-Every AI-generated change in this repo must clear the 13-point checklist from Taha Jaffri's "Security Rules for AI-Generated Apps". Current status per rule:
+Every AI-generated change must clear all 13. Current per-rule status:
 
-1. **Secrets in env only** — ✅ `.env` gitignored. ⚠️ `REACT_APP_DATA_KEY` inlined in JS bundle by CRA (free-tier limit; mitigated by admin-only Firestore reads in Phase A rules so the bundle key alone is useless to attackers).
-2. **Rate limiting** — ❌ None today. Firebase App Check + reCAPTCHA v3 is the free-tier fix; integrate when ready. Anonymous registration writes are the exposed surface.
-3. **Input validation** — ✅ Client-side `validateRegistrationForm` + server-side Firestore rules (`hasEncryptedShape`, `isValidEventRef`, `eventIsActive`). No Zod yet; add when introducing complex form shapes.
-4. **Auth** — ✅ Firebase Auth (bcrypt handled internally) + `/users` allowlist (invite-only). JWTs in httpOnly cookies via SDK. ⚠️ Lockout policy not custom-tuned — Firebase has defaults.
-5. **SQL / DB** — ✅ Firestore (NoSQL); no SQL injection surface. Firebase SDK used everywhere; no raw queries.
-6. **CORS** — ✅ Firestore SDK + Vercel default (same-origin). No wildcards.
-7. **HTTP headers** — ✅ `vercel.json` sets X-Content-Type-Options, X-Frame-Options DENY, Referrer-Policy, Permissions-Policy, Strict-Transport-Security (HSTS), Content-Security-Policy.
-8. **File uploads** — ✅ No upload feature in this app.
-9. **Error handling** — ⚠️ Generic messages to user. Console-only logs. No Sentry yet.
-10. **Dependency security** — ⚠️ `yarn.lock` pinned. `yarn audit` shows 161 vulns — ALL in `react-scripts` transitive dev tooling (Jest, webpack-dev-server); none ship to client. Production deps (firebase, qrcode, lucide-react, recharts) clean. Re-audit on every dep change.
-11. **XSS** — ✅ Zero `dangerouslySetInnerHTML`. React escapes by default. No `eval` or `new Function`.
-12. **Deploy gate** — ✅ .env gitignored, HTTPS enforced, debug off, CORS default, ❌ rate limit pending (rule 2).
-13. **AI / LLM rules** — ✅ N/A. No LLM in data path.
+1. **Secrets in env only** — ✅ `.env` gitignored. ⚠️ `REACT_APP_DATA_KEY` inlined in JS bundle by CRA (free-tier limit; Phase A rules mitigate).
+2. **Rate limiting** — ❌ None today. Firebase App Check + reCAPTCHA v3 is the free-tier fix.
+3. **Input validation** — ✅ Client-side + Firestore rule shape checks.
+4. **Auth** — ✅ Firebase Auth + `/users` allowlist (invite-only). ⚠️ Lockout uses Firebase defaults.
+5. **SQL / DB** — ✅ Firestore (NoSQL); no SQL injection surface.
+6. **CORS** — ✅ Firestore SDK + Vercel default same-origin.
+7. **HTTP headers** — ✅ HSTS + CSP + X-Frame-Options DENY + Permissions-Policy.
+8. **File uploads** — ✅ N/A.
+9. **Error handling** — ⚠️ Generic messages to user; no Sentry yet.
+10. **Dependency security** — ⚠️ `yarn.lock` pinned; 161 dev-only CRA vulns (none in client bundle).
+11. **XSS** — ✅ Zero `dangerouslySetInnerHTML`; React escapes by default.
+12. **Deploy gate** — ✅ `.env` gitignored, HTTPS, debug off, CORS scoped. ❌ rate limit pending.
+13. **AI / LLM rules** — ✅ N/A.
 
-Future AI edits to this codebase must keep every ✅ line ✅ and improve ⚠️/❌ lines toward ✅. If a rule changes status, update this section in the same commit.
+Future AI edits must keep ✅ lines ✅ and improve ⚠️/❌. If a rule changes status, update this section in the same commit.
 
 ---
 
 ## 18. Open Threads
 
-- [ ] Push `codex/setup-onboarding` to `shashankgowda7755/scbv1` (blocked on git auth).
-- [ ] Promote latest local-built Vercel deploy to `scbv1-ehbx.vercel.app` alias (blocked on Vercel BLOCKED state).
-- [ ] User to review `TEXT_INVENTORY.md` and provide copy edits.
-- [x] V2 backend wired in `event-store.js` (checkins, checkouts, attendance collections, lifecycle, status engine).
-- [ ] Wire Check-In UI page (consume `saveCheckIn`, show registered/walk-in confirmation).
-- [ ] Wire Checkout UI page (consume `saveCheckOut`).
-- [ ] Wire Reports UI page (consume `computeAttendance` + `subscribeAttendance`, render status counts + per-attendee table, CSV/PDF export).
-- [ ] Wire Form Builder (V2).
-- [ ] Add `Close Event` button on Dashboard (triggers `closeEvent` → auto-runs attendance engine).
-- [ ] Add Firebase Auth + operator claims (V2 hardening).
+- [ ] **Manual TTL setup** — 4 console clicks at `https://console.firebase.google.com/project/scb-event-registration/firestore/databases/-default-/ttl`. Pick each of `registrations` / `checkins` / `checkouts` / `attendance` → field `expiresAt` → Create. (Gcloud CLI blocked: needs Blaze billing.)
+- [ ] Firebase App Check + reCAPTCHA v3 (rate limiting). Free tier. ~30 min.
+- [ ] Sentry hobby tier. Free. ~20 min.
+- [ ] V2 hardening (Cloud Functions envelope, audit log, re-encrypt on rotate) — needs Blaze.
