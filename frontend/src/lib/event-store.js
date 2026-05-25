@@ -170,6 +170,27 @@ async function buildRegistrationRecord(event, formData, previousRecord) {
 
   const encrypted = await encryptRegistrationFields(plainData);
 
+  // Phase D: encrypt extra optional PII / metadata fields. Each value goes
+  // through the same AES-256-GCM path; blank values produce empty strings.
+  const departmentCipher = await encryptString(normalizeString(formData.department));
+  const cityCipher = await encryptString(normalizeString(formData.city));
+  const notesCipher = await encryptString(normalizeString(formData.notes));
+
+  // customData (Form Builder dynamic fields) — encrypt each STRING value.
+  // Booleans (checkbox fields) stay clear since they leak nothing PII-shaped.
+  // Field keys stay clear so the admin can still iterate the map by key.
+  const customDataPlain = (formData.customData && typeof formData.customData === "object")
+    ? formData.customData
+    : {};
+  const customDataCipher = {};
+  for (const [k, v] of Object.entries(customDataPlain)) {
+    if (typeof v === "string") {
+      customDataCipher[k] = await encryptString(normalizeString(v));
+    } else {
+      customDataCipher[k] = v;
+    }
+  }
+
   return {
     id: `${event.id}__${dedupeHash}`,
     eventId: event.id,
@@ -181,19 +202,12 @@ async function buildRegistrationRecord(event, formData, previousRecord) {
     employeeId: encrypted.employeeId,
     email: encrypted.email,
     phone: encrypted.phone,
-    department: normalizeString(formData.department),
-    city: normalizeString(formData.city),
+    department: departmentCipher,
+    city: cityCipher,
+    notes: notesCipher,
     participation: formData.participation === "No" ? "No" : "Yes",
     photoConsent: Boolean(formData.photoConsent),
-    customData:
-      formData.customData && typeof formData.customData === "object"
-        ? Object.fromEntries(
-            Object.entries(formData.customData).map(([k, v]) => [
-              k,
-              typeof v === "string" ? normalizeString(v) : v,
-            ]),
-          )
-        : {},
+    customData: customDataCipher,
     consent: Boolean(formData.consent),
     maskedFullName: buildMaskedName(plainData.fullName),
     maskedEmail: buildMaskedEmail(plainData.email),
@@ -229,6 +243,30 @@ export async function decryptRegistration(record) {
     } catch (error) {
       decrypted[field] = "[decrypt failed]";
     }
+  }
+  // Phase D extras. Each is opportunistic — pre-Phase-D records have these
+  // in clear; decryptString passes through non-ciphertext strings unchanged.
+  for (const field of ["department", "city", "notes"]) {
+    try {
+      decrypted[field] = await decryptString(record[field]);
+    } catch (error) {
+      decrypted[field] = "[decrypt failed]";
+    }
+  }
+  if (record.customData && typeof record.customData === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(record.customData)) {
+      if (typeof v === "string") {
+        try {
+          out[k] = await decryptString(v);
+        } catch (error) {
+          out[k] = "[decrypt failed]";
+        }
+      } else {
+        out[k] = v;
+      }
+    }
+    decrypted.customData = out;
   }
   return decrypted;
 }
