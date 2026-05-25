@@ -2,24 +2,27 @@ rules_version = '2';
 
 // Security rules for the SCB Event Registration platform.
 //
-// Trust model:
-//   - The browser AES-256-GCM encrypts sensitive fields BEFORE writing.
-//   - Public writes are restricted to /registrations, /checkins, /checkouts
-//     and must carry the encrypted ciphertext shape and reference a real event.
-//   - /events publicly readable (participant page resolves QR event id).
-//   - Reads on registrations/checkins/checkouts/attendance are open in V1 because
-//     the dashboard runs on the private operator URL; the data leaked is just
-//     ciphertext + masked previews.
+// Trust model (Phase A hardening):
+//   - Sensitive fields are AES-256-GCM encrypted in the browser BEFORE writing.
+//   - Public writes are allowed on /registrations, /checkins, /checkouts so
+//     anonymous participants can submit from the QR link. Writes are
+//     shape-validated: ciphertext format on PII, valid event reference,
+//     event is "active".
+//   - Reads on /registrations, /checkins, /checkouts, /attendance are LOCKED
+//     to authenticated admins (existing /users doc). A breach attacker without
+//     valid Firebase Auth + admin allowlist cannot enumerate registrations,
+//     even with the project id.
+//   - /events publicly readable (the QR scan resolves event id without auth).
 //
-// V2 hardening: Firebase Auth + custom claim `operator: true` for staff,
-// gate reads/deletes/event-writes on that claim.
+// V2 hardening (later phases): Cloud Function envelope so the AES key lives
+// only in Google Secret Manager; rotate re-encrypts historic data.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function hasEncryptedShape(field) {
       return field is string
-        && (field.size() == 0 || field.matches('^enc:v1:.+\\..+'));
+        && (field.size() == 0 || field.matches('^enc:v[12]:.+\\..+'));
     }
 
     function isValidEventRef(eventId) {
@@ -36,12 +39,16 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
+      // Public read so QR scans can resolve event id without auth.
       allow read: if true;
-      allow create, update, delete: if true;
+      // Writes are admin-only.
+      allow create, update, delete: if isAdmin();
     }
 
     match /registrations/{registrationId} {
-      allow read: if true;
+      // PHASE A: admin-only read. Operator dashboard requires sign-in.
+      allow read: if isAdmin();
+      // Public write — anonymous participants submit ciphertext via the QR.
       allow create, update: if
         request.resource.data.eventId is string
         && isValidEventRef(request.resource.data.eventId)
@@ -53,11 +60,11 @@ service cloud.firestore {
         && request.resource.data.participation in ['Yes', 'No']
         && request.resource.data.photoConsent is bool
         && request.resource.data.dedupeHash is string;
-      allow delete: if true;
+      allow delete: if isAdmin();
     }
 
     match /checkins/{checkInId} {
-      allow read: if true;
+      allow read: if isAdmin();
       allow create: if
         request.resource.data.eventId is string
         && isValidEventRef(request.resource.data.eventId)
@@ -67,11 +74,11 @@ service cloud.firestore {
         && request.resource.data.walkInFlag is bool
         && request.resource.data.dedupeHash is string;
       allow update: if false;
-      allow delete: if true;
+      allow delete: if isAdmin();
     }
 
     match /checkouts/{checkOutId} {
-      allow read: if true;
+      allow read: if isAdmin();
       allow create: if
         request.resource.data.eventId is string
         && isValidEventRef(request.resource.data.eventId)
@@ -80,19 +87,19 @@ service cloud.firestore {
         && request.resource.data.walkInFlag is bool
         && request.resource.data.dedupeHash is string;
       allow update: if false;
-      allow delete: if true;
+      allow delete: if isAdmin();
     }
 
     match /attendance/{attendanceId} {
-      allow read: if true;
-      allow create, update, delete: if true;
+      // Roll-up of registrations + checkins + checkouts. Admin-only end-to-end.
+      allow read: if isAdmin();
+      allow create, update, delete: if isAdmin();
     }
 
-    // Admin user directory. Only logged-in admins can read or write.
-    // The auth user is the gate; this collection just mirrors Firebase Auth users
-    // so the in-app Users page can list them (client SDK can't enumerate auth users).
-    // Admin allowlist. Self-read so signIn() can check own membership unauthenticated-to-firestore-perspective right after auth.
-    // Read of other docs and all writes require an existing admin (existing /users doc).
+    // Admin user directory. The auth user is the gate; this collection just
+    // mirrors Firebase Auth users so the in-app Users page can list them
+    // (client SDK can't enumerate auth users on its own). Self-read so
+    // signIn() can verify the just-signed-in user is on the allowlist.
     match /users/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
       allow create, update, delete: if isAdmin();
