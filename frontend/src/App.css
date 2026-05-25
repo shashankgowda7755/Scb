@@ -1646,3 +1646,99 @@ td {
   border-color: rgba(220, 38, 38, 0.6) !important;
   color: #991B1B !important;
 }
+
+/* ---------- Participant full-screen confirmation popup ---------- */
+
+.participant-popup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(10, 10, 10, 0.7);
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.18s ease-out;
+}
+
+.participant-popup {
+  width: min(480px, 100%);
+  background: var(--paper);
+  border-radius: 16px;
+  padding: 2rem 1.75rem 1.5rem;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  animation: popIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.participant-popup-good { border-top: 6px solid #059669; }
+.participant-popup-warn { border-top: 6px solid var(--orange); }
+.participant-popup-info { border-top: 6px solid #2563EB; }
+
+.participant-popup-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 1rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--paper);
+}
+
+.participant-popup-good .participant-popup-icon { background: #059669; }
+.participant-popup-warn .participant-popup-icon { background: var(--orange); }
+.participant-popup-info .participant-popup-icon { background: #2563EB; }
+
+.participant-popup-title {
+  margin: 0 0 0.6rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.participant-popup-body {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--gray-700);
+}
+
+.participant-popup-meta {
+  margin: 0.35rem 0;
+  font-size: 0.85rem;
+  color: var(--gray-500);
+}
+
+.participant-popup-meta strong {
+  color: var(--ink);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.participant-popup-cta {
+  margin-top: 1.25rem;
+  width: 100%;
+  background: var(--ink);
+}
+
+.participant-popup-cta:hover:not(:disabled) {
+  background: var(--orange);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (max-width: 480px) {
+  .participant-popup { padding: 1.5rem 1.25rem 1.25rem; }
+  .participant-popup-icon { width: 56px; height: 56px; font-size: 1.6rem; }
+  .participant-popup-title { font-size: 1.1rem; }
+}

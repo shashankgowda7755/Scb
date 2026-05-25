@@ -380,6 +380,116 @@ async function downloadCsv(filename, rows, event) {
   URL.revokeObjectURL(url);
 }
 
+// Full-screen confirmation popup shown to participants after every form
+// submit. `kind` is the action: "register" | "checkin" | "checkout". `status`
+// is the server-side outcome that drives tone + extra messaging:
+//   register:   "created" | "updated"
+//   checkin:    "checked-in" | "walk-in"
+//   checkout:   "complete" | "reg-checkout-no-checkin" | "walkin-complete" | "walkin-checkout"
+// "tone" is "good" (green), "warn" (orange), or "info" (blue).
+function ParticipantPopup({ popup, onClose }) {
+  if (!popup || !popup.open) return null;
+
+  const cfg = (() => {
+    if (popup.kind === "register") {
+      if (popup.status === "updated") {
+        return {
+          tone: "info",
+          title: "Entry updated",
+          body: "We found your earlier submission and replaced it with this one. Your registration is saved.",
+        };
+      }
+      return {
+        tone: "good",
+        title: "Registration captured",
+        body: "Your details have been saved securely. They are encrypted before storage and only the organisers can decrypt them.",
+      };
+    }
+    if (popup.kind === "checkin") {
+      if (popup.status === "walk-in") {
+        return {
+          tone: "warn",
+          title: "Recorded as walk-in",
+          body:
+            "We could not find an earlier registration for your ID, so we have captured this as a walk-in check-in. Please tell the event team you did not register, in case they need to update the attendee list.",
+        };
+      }
+      return {
+        tone: "good",
+        title: "Checked in",
+        body: popup.displayName
+          ? `Welcome, ${popup.displayName}. Your check-in has been recorded.`
+          : "Your check-in has been recorded.",
+      };
+    }
+    if (popup.kind === "checkout") {
+      if (popup.status === "complete") {
+        return {
+          tone: "good",
+          title: "Checked out",
+          body: popup.displayName
+            ? `Thank you, ${popup.displayName}. Your checkout has been recorded.`
+            : "Your checkout has been recorded.",
+        };
+      }
+      if (popup.status === "reg-checkout-no-checkin") {
+        return {
+          tone: "warn",
+          title: "Checkout recorded — but you did NOT check in",
+          body:
+            "Your registration exists, but we have no check-in record for you today. We have still captured this checkout and flagged it for the event team. Your status will appear as \"Reg + Checkout, No Check-In\" in the report.",
+        };
+      }
+      if (popup.status === "walkin-complete") {
+        return {
+          tone: "warn",
+          title: "Walk-in checkout recorded",
+          body:
+            "We could not find a registration for your ID, but you did check in earlier today. Your checkout is saved and you will appear as \"Walk-In Complete\" in the report.",
+        };
+      }
+      if (popup.status === "walkin-checkout") {
+        return {
+          tone: "warn",
+          title: "No registration, no check-in — checkout still captured",
+          body:
+            "We have no prior record of you registering or checking in for this event. We have captured this checkout entry anyway. The event team will see you as \"Walk-In Checkout Only\". If this is wrong, talk to the desk before leaving.",
+        };
+      }
+    }
+    return {
+      tone: "good",
+      title: "Saved",
+      body: "Your entry has been captured.",
+    };
+  })();
+
+  return (
+    <div className="participant-popup-overlay" role="dialog" aria-modal="true" aria-label={cfg.title}>
+      <div className={`participant-popup participant-popup-${cfg.tone}`}>
+        <div className="participant-popup-icon">
+          {cfg.tone === "warn" ? "!" : "✓"}
+        </div>
+        <h2 className="participant-popup-title">{cfg.title}</h2>
+        <p className="participant-popup-body">{cfg.body}</p>
+        {popup.time && (
+          <p className="participant-popup-meta">
+            Time recorded: <strong>{formatDateTime(popup.time)}</strong>
+          </p>
+        )}
+        {popup.masked && (
+          <p className="participant-popup-meta">
+            ID (masked): <strong>{popup.masked}</strong>
+          </p>
+        )}
+        <button type="button" className="gform-submit participant-popup-cta" onClick={onClose}>
+          Done
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walkInOpen, setWalkInOpen, onWalkInConfirm }) {
   const [walkInName, setWalkInName] = useState("");
   return (
@@ -635,6 +745,12 @@ function App() {
   const [checkInBusy, setCheckInBusy] = useState(false);
   const [checkOutBusy, setCheckOutBusy] = useState(false);
   const [walkInOpen, setWalkInOpen] = useState(false);
+  // Full-screen confirmation popup shown to the participant after every
+  // registration / check-in / check-out submit. Decoupled from inline alerts
+  // so the participant gets a clear, blocking confirmation that their data
+  // was captured (and, where relevant, that a flag was raised — e.g. checked
+  // out without checking in).
+  const [participantPopup, setParticipantPopup] = useState(null);
 
   // Reports
   const [reportFilter, setReportFilter] = useState("ALL");
@@ -1011,6 +1127,13 @@ function App() {
       }
 
       setRegistrationForm(registrationDefaults);
+      setParticipantPopup({
+        open: true,
+        kind: "register",
+        status: result.status,
+        time: result.record?.createdAt || result.record?.updatedAt,
+        masked: result.record?.maskedEmployeeId,
+      });
       setMessage({
         type: "success",
         text: result.status === "updated"
@@ -1034,12 +1157,19 @@ function App() {
 
     setSubmitting(true);
     try {
-      await saveRegistration({
+      const r2 = await saveRegistration({
         event: duplicateState.event,
         formData: duplicateState.pendingRegistration,
         replace: true,
       });
       setRegistrationForm(registrationDefaults);
+      setParticipantPopup({
+        open: true,
+        kind: "register",
+        status: "updated",
+        time: r2.record?.updatedAt,
+        masked: r2.record?.maskedEmployeeId,
+      });
       setMessage({
         type: "success",
         text: "The existing registration has been replaced and revision history was preserved.",
@@ -1249,6 +1379,14 @@ function App() {
         masked: result.record.maskedUniqueId,
       });
       setCheckInForm({ uniqueId: "", fullName: "" });
+      setParticipantPopup({
+        open: true,
+        kind: "checkin",
+        status: result.status,
+        displayName: result.displayName,
+        time: result.record.checkInTime,
+        masked: result.record.maskedUniqueId,
+      });
       setMessage({
         type: "success",
         text: result.status === "walk-in"
@@ -1294,6 +1432,14 @@ function App() {
         masked: result.record.maskedUniqueId,
       });
       setCheckOutForm({ uniqueId: "", fullName: "" });
+      setParticipantPopup({
+        open: true,
+        kind: "checkout",
+        status: result.status,
+        displayName: result.displayName,
+        time: result.record.checkOutTime,
+        masked: result.record.maskedUniqueId,
+      });
 
       const blurb = {
         complete: `${result.displayName || "Attendee"} checked out at ${formatDateTime(result.record.checkOutTime)}.`,
@@ -1624,6 +1770,8 @@ function App() {
 
   if (participantMode === "checkin") {
     return (
+      <>
+      <ParticipantPopup popup={participantPopup} onClose={() => setParticipantPopup(null)} />
       <ParticipantCheckIn
         event={selectedEvent}
         form={checkInForm}
@@ -1645,15 +1793,26 @@ function App() {
                 masked: result.record.maskedUniqueId,
               });
               setCheckInForm({ uniqueId: "", fullName: "" });
+              setParticipantPopup({
+                open: true,
+                kind: "checkin",
+                status: "walk-in",
+                displayName: name,
+                time: result.record.checkInTime,
+                masked: result.record.maskedUniqueId,
+              });
             }
           });
         }}
       />
+      </>
     );
   }
 
   if (participantMode === "checkout") {
     return (
+      <>
+      <ParticipantPopup popup={participantPopup} onClose={() => setParticipantPopup(null)} />
       <ParticipantCheckOut
         event={selectedEvent}
         form={checkOutForm}
@@ -1662,6 +1821,7 @@ function App() {
         busy={checkOutBusy}
         onSubmit={handleCheckOutSubmit}
       />
+      </>
     );
   }
 
@@ -1833,6 +1993,8 @@ function App() {
             </div>
           </div>
         )}
+
+        <ParticipantPopup popup={participantPopup} onClose={() => setParticipantPopup(null)} />
       </div>
     );
   }
