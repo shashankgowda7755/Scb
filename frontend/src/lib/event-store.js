@@ -217,10 +217,15 @@ async function buildRegistrationRecord(event, formData, previousRecord) {
     photoConsent: Boolean(formData.photoConsent),
     customData: customDataCipher,
     consent: Boolean(formData.consent),
-    maskedFullName: buildMaskedName(plainData.fullName),
-    maskedEmail: buildMaskedEmail(plainData.email),
-    maskedPhone: buildMaskedPhone(plainData.phone),
-    maskedEmployeeId: buildMaskedIdentifier(plainData.employeeId),
+    // Masked previews removed: even partial leaks (first/last 2 chars,
+    // initials) are now hidden. The operator dashboard renders bullets
+    // until Reveal (Decrypt) is clicked. Empty strings keep the field
+    // present for downstream code that still references the keys, without
+    // leaking anything.
+    maskedFullName: "",
+    maskedEmail: "",
+    maskedPhone: "",
+    maskedEmployeeId: "",
     createdAt: previousRecord?.createdAt || now,
     updatedAt: now,
     expiresAt: buildExpiresAt(event.eventDate, event.retentionDays),
@@ -841,8 +846,9 @@ async function buildAttendanceLog(event, kind, { uniqueId, fullName, registratio
     walkInFlag: !registration,
     uniqueId: encryptedUniqueId,
     fullName: encryptedFullName,
-    maskedUniqueId: buildMaskedIdentifier(normalizedUniqueId),
-    maskedFullName: buildMaskedName(normalizedFullName || registration?.maskedFullName || ""),
+    // No masked previews — full opacity until decrypt.
+    maskedUniqueId: "",
+    maskedFullName: "",
     [kind === "checkin" ? "checkInTime" : "checkOutTime"]: now,
     createdAt: now,
     expiresAt: buildExpiresAt(event.eventDate, event.retentionDays),
@@ -996,16 +1002,8 @@ export async function computeAttendance(eventId) {
       walkInFlag: !item.registration,
       uniqueId: source.employeeId || source.uniqueId || "",
       fullName: source.fullName || "",
-      maskedUniqueId:
-        item.registration?.maskedEmployeeId ||
-        item.checkIn?.maskedUniqueId ||
-        item.checkOut?.maskedUniqueId ||
-        "",
-      maskedFullName:
-        item.registration?.maskedFullName ||
-        item.checkIn?.maskedFullName ||
-        item.checkOut?.maskedFullName ||
-        "",
+      maskedUniqueId: "",
+      maskedFullName: "",
       statusCode,
       computedAt: now,
       expiresAt: buildExpiresAt(event.eventDate, event.retentionDays),

@@ -2824,8 +2824,8 @@ function App() {
                       <TableBody>
                         {eventCheckIns.map((row) => (
                           <TableRow key={row.id}>
-                            <TableCell>{row.maskedUniqueId}</TableCell>
-                            <TableCell>{row.maskedFullName || "—"}</TableCell>
+                            <TableCell><span className="cell-hidden">•••</span></TableCell>
+                            <TableCell><span className="cell-hidden">•••</span></TableCell>
                             <TableCell>{row.walkInFlag ? "Yes" : "No"}</TableCell>
                             <TableCell>{formatDateTime(row.checkInTime)}</TableCell>
                           </TableRow>
@@ -2935,8 +2935,8 @@ function App() {
                       <TableBody>
                         {eventCheckOuts.map((row) => (
                           <TableRow key={row.id}>
-                            <TableCell>{row.maskedUniqueId}</TableCell>
-                            <TableCell>{row.maskedFullName || "—"}</TableCell>
+                            <TableCell><span className="cell-hidden">•••</span></TableCell>
+                            <TableCell><span className="cell-hidden">•••</span></TableCell>
                             <TableCell>{row.walkInFlag ? "Yes" : "No"}</TableCell>
                             <TableCell>{formatDateTime(row.checkOutTime)}</TableCell>
                           </TableRow>
@@ -3089,8 +3089,8 @@ function App() {
                             const showPlain = !privacyMode && decrypted;
                             return (
                               <TableRow key={row.id}>
-                                <TableCell>{showPlain ? decrypted.fullName : row.maskedFullName || "(masked)"}</TableCell>
-                                <TableCell>{showPlain ? decrypted.uniqueId : row.maskedUniqueId}</TableCell>
+                                <TableCell>{showPlain ? decrypted.fullName : <span className="cell-hidden">•••</span>}</TableCell>
+                                <TableCell>{showPlain ? decrypted.uniqueId : <span className="cell-hidden">•••</span>}</TableCell>
                                 <TableCell>{row.registrationTime ? formatDateTime(row.registrationTime) : "—"}</TableCell>
                                 <TableCell>{row.checkInTime ? formatDateTime(row.checkInTime) : "—"}</TableCell>
                                 <TableCell>{row.checkOutTime ? formatDateTime(row.checkOutTime) : "—"}</TableCell>
@@ -3383,9 +3383,11 @@ function App() {
                             return (
                               <TableRow key={registration.id}>
                                 <TableCell>
-                                  {showPlain ? decrypted.fullName : registration.maskedFullName || "(masked)"}
+                                  {showPlain ? decrypted.fullName : <span className="cell-hidden">•••</span>}
                                 </TableCell>
-                                <TableCell>{showPlain ? decrypted.employeeId : registration.maskedEmployeeId}</TableCell>
+                                <TableCell>
+                                  {showPlain ? decrypted.employeeId : <span className="cell-hidden">•••</span>}
+                                </TableCell>
                                 <TableCell>{registration.participation || "Yes"}</TableCell>
                                 <TableCell>{registration.photoConsent ? "Yes" : "No"}</TableCell>
                                 <TableCell>{registration.revision}</TableCell>
@@ -3651,19 +3653,19 @@ function App() {
                     <div className="duplicate-panel">
                       <div className="summary-item">
                         <span>Name</span>
-                        <strong>{duplicateDecrypted ? duplicateDecrypted.fullName : duplicateState.existingRecord.maskedFullName || "Decrypting..."}</strong>
+                        <strong>{duplicateDecrypted ? duplicateDecrypted.fullName : "•••"}</strong>
                       </div>
                       <div className="summary-item">
                         <span>Employee ID</span>
-                        <strong>{duplicateState.existingRecord.maskedEmployeeId}</strong>
+                        <strong>{duplicateDecrypted ? duplicateDecrypted.employeeId : "•••"}</strong>
                       </div>
                       <div className="summary-item">
                         <span>Email</span>
-                        <strong>{duplicateState.existingRecord.maskedEmail}</strong>
+                        <strong>{duplicateDecrypted ? duplicateDecrypted.email || "—" : "•••"}</strong>
                       </div>
                       <div className="summary-item">
                         <span>Phone</span>
-                        <strong>{duplicateState.existingRecord.maskedPhone}</strong>
+                        <strong>{duplicateDecrypted ? duplicateDecrypted.phone || "—" : "•••"}</strong>
                       </div>
                       <div className="summary-item">
                         <span>Last Updated</span>

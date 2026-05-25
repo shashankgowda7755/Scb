@@ -1783,3 +1783,13 @@ td {
   border: 1px solid var(--orange);
   border-bottom-width: 2px;
 }
+
+/* ---------- Hidden cell placeholder (pre-Reveal) ---------- */
+
+.cell-hidden {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 1.1rem;
+  letter-spacing: 0.2em;
+  color: var(--gray-400);
+  user-select: none;
+}
