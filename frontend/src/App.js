@@ -620,18 +620,9 @@ function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walk
           )}
         </div>
 
-        {result && result.kind !== "duplicate" && (
-          <div className="gform-alert gform-alert-success">
-            <CheckCircle2 className="inline h-4 w-4 mr-2" />
-            {result.displayName ? `Welcome, ${result.displayName}.` : "Walk-in check-in recorded."} Time: {formatDateTime(result.time)}.
-          </div>
-        )}
-        {result && result.kind === "duplicate" && (
-          <div className="gform-alert gform-alert-error">
-            <XCircle className="inline h-4 w-4 mr-2" />
-            Already checked in at {formatDateTime(result.time)}.
-          </div>
-        )}
+        {/* Inline result banner removed. ParticipantPopup is the single
+            source of feedback so the participant doesn't see a stale "green
+            checkout recorded" banner next to a fresh empty form. */}
 
         <form className="gform-form" onSubmit={onSubmit}>
           <div className="gform-q">
@@ -698,18 +689,8 @@ function ParticipantCheckOut({ event, form, setForm, result, busy, onSubmit }) {
           )}
         </div>
 
-        {result && result.kind !== "duplicate" && (
-          <div className="gform-alert gform-alert-success">
-            <CheckCircle2 className="inline h-4 w-4 mr-2" />
-            Checkout recorded at {formatDateTime(result.time)}.
-          </div>
-        )}
-        {result && result.kind === "duplicate" && (
-          <div className="gform-alert gform-alert-error">
-            <XCircle className="inline h-4 w-4 mr-2" />
-            Already checked out at {formatDateTime(result.time)}.
-          </div>
-        )}
+        {/* Inline checkout-result banner removed; ParticipantPopup handles
+            outcome reporting end-to-end. */}
 
         <form className="gform-form" onSubmit={onSubmit}>
           <div className="gform-q">
@@ -1284,12 +1265,9 @@ function App() {
         time: result.record?.createdAt || result.record?.updatedAt,
         masked: result.record?.maskedEmployeeId,
       });
-      setMessage({
-        type: "success",
-        text: result.status === "updated"
-          ? "Existing registration updated successfully."
-          : "Registration captured successfully.",
-      });
+      // Clear any stale inline error from a previous validation; popup is the
+      // confirmation now.
+      setMessage({ type: "", text: "" });
     } catch (error) {
       setMessage({
         type: "error",
@@ -2081,8 +2059,12 @@ function App() {
             <p className="gform-required">* Indicates required question</p>
           </div>
 
-          {message.text && (
-            <div className={`gform-alert ${message.type === "error" ? "gform-alert-error" : "gform-alert-success"}`}>
+          {/* Success banner removed — ParticipantPopup is the single feedback
+              surface so a stale "Registration captured" line doesn't sit
+              next to a fresh empty form. Inline ERROR alerts stay because
+              field-level validation needs to point at the form. */}
+          {message.text && message.type === "error" && (
+            <div className="gform-alert gform-alert-error">
               {message.text}
             </div>
           )}
