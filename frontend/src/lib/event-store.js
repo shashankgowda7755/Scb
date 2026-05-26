@@ -909,7 +909,7 @@ async function buildAttendanceLog(event, kind, { uniqueId, fullName, registratio
   };
 }
 
-export async function saveCheckIn({ event, uniqueId, fullName }) {
+export async function saveCheckIn({ event, uniqueId, fullName, allowWalkIn }) {
   if (!event) return { status: "event-not-found" };
   if (event.status === "closed") return { status: "event-closed" };
   if (event.checkInEnabled === false) return { status: "form-disabled" };
@@ -922,6 +922,15 @@ export async function saveCheckIn({ event, uniqueId, fullName }) {
   const existing = await readCollectionDoc("checkins", recordId);
   if (existing) {
     return { status: "duplicate", existing };
+  }
+
+  // No prior registration AND the caller hasn't explicitly opted in to a
+  // walk-in capture: return a confirmation status without writing anything.
+  // The UI shows a "Could not find earlier registration — still check in?"
+  // confirm, collects the attendee's name, then retries with
+  // allowWalkIn:true.
+  if (!registration && !allowWalkIn) {
+    return { status: "needs-walkin-confirm" };
   }
 
   const nameForRecord = fullName || (registration ? await decryptString(registration.fullName).catch(() => "") : "");

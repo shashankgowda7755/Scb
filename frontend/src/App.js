@@ -678,7 +678,19 @@ function RevisionHistoryModal({ state, onClose }) {
 }
 
 function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walkInOpen, setWalkInOpen, onWalkInConfirm }) {
+  // Two-stage walk-in flow:
+  //   stage="confirm" — "Could not find earlier registration. Still check in?"
+  //   stage="name"    — name input + Record check-in button
+  // Reset to "confirm" every time the modal opens so the participant always
+  // sees the gate first.
+  const [walkInStage, setWalkInStage] = useState("confirm");
   const [walkInName, setWalkInName] = useState("");
+  useEffect(() => {
+    if (walkInOpen) {
+      setWalkInStage("confirm");
+      setWalkInName("");
+    }
+  }, [walkInOpen]);
   return (
     <div className="gform-page">
       <main className="gform-shell">
@@ -716,29 +728,69 @@ function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walk
         </form>
 
         {walkInOpen && (
-          <div className="modal-overlay" role="dialog" aria-modal="true">
-            <div className="modal-card">
-              <h2 className="text-xl font-semibold">No registration found</h2>
-              <p className="text-sm text-slate-600">
-                Capture as walk-in. Add the attendee's name for the report.
-              </p>
-              <div className="gform-q">
-                <label htmlFor="walkin-name">Full Name</label>
-                <input
-                  id="walkin-name"
-                  className="gform-input"
-                  value={walkInName}
-                  onChange={(e) => setWalkInName(e.target.value)}
-                />
-              </div>
-              <div className="modal-actions">
-                <button type="button" className="gform-submit" style={{ background: "#71717A" }} onClick={() => setWalkInOpen(false)}>
-                  Cancel
-                </button>
-                <button type="button" className="gform-submit" onClick={() => onWalkInConfirm(walkInName.trim() || "Walk-in")}>
-                  Record Walk-In
-                </button>
-              </div>
+          <div className="participant-popup-overlay" role="dialog" aria-modal="true">
+            <div className="participant-popup participant-popup-warn">
+              <div className="participant-popup-icon">!</div>
+              {walkInStage === "confirm" ? (
+                <>
+                  <h2 className="participant-popup-title">Could not find earlier registration</h2>
+                  <p className="participant-popup-body">
+                    We don't have an earlier registration for this Unique ID. Do you want to still check in as a walk-in? The event team will see you flagged as walk-in in the report.
+                  </p>
+                  <div className="modal-actions" style={{ marginTop: 24 }}>
+                    <button
+                      type="button"
+                      className="gform-submit"
+                      style={{ background: "#71717A" }}
+                      onClick={() => setWalkInOpen(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="gform-submit participant-popup-cta"
+                      onClick={() => setWalkInStage("name")}
+                    >
+                      Yes, still check in
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="participant-popup-title">Enter your full name</h2>
+                  <p className="participant-popup-body">
+                    Since we have no prior registration, please add your name so the event team can identify you on the report.
+                  </p>
+                  <div className="gform-q" style={{ marginTop: 16, width: "100%" }}>
+                    <label htmlFor="walkin-name">Full Name</label>
+                    <input
+                      id="walkin-name"
+                      className="gform-input"
+                      autoFocus
+                      value={walkInName}
+                      onChange={(e) => setWalkInName(e.target.value)}
+                    />
+                  </div>
+                  <div className="modal-actions" style={{ marginTop: 16 }}>
+                    <button
+                      type="button"
+                      className="gform-submit"
+                      style={{ background: "#71717A" }}
+                      onClick={() => setWalkInOpen(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="gform-submit participant-popup-cta"
+                      disabled={!walkInName.trim()}
+                      onClick={() => onWalkInConfirm(walkInName.trim())}
+                    >
+                      Record check-in
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -1558,16 +1610,29 @@ function App() {
     }
     setCheckInBusy(true);
     try {
+      // allowWalkIn:true whenever the caller already has a name in hand
+      // (operator panel has an inline walk-in name field; participant view
+      // does not, so first submit there hits the confirm gate).
       const result = await saveCheckIn({
         event: selectedEvent,
         uniqueId: trimmedId,
         fullName: checkInForm.fullName.trim(),
+        allowWalkIn: Boolean(checkInForm.fullName.trim()),
       });
       if (result.status === "duplicate") {
         const t = result.existing.checkInTime;
         setCheckInResult({ kind: "duplicate", time: t, masked: result.existing.maskedUniqueId });
         setParticipantPopup({ open: true, kind: "checkin", status: "duplicate", time: t });
         setMessage({ type: "error", text: `Already checked in at ${formatDateTime(t)}.` });
+        setCheckInBusy(false);
+        return;
+      }
+      if (result.status === "needs-walkin-confirm") {
+        // Participant view path: no registration found, no name yet. Show
+        // the 2-stage walk-in modal (confirm → name → submit). The modal
+        // calls onWalkInConfirm with the name, which retries saveCheckIn
+        // with allowWalkIn:true.
+        setWalkInOpen(true);
         setCheckInBusy(false);
         return;
       }
@@ -1585,11 +1650,6 @@ function App() {
       }
       if (result.status === "missing-id") {
         setParticipantPopup({ open: true, kind: "checkin", status: "missing-id" });
-        setCheckInBusy(false);
-        return;
-      }
-      if (result.status === "walk-in" && !checkInForm.fullName.trim()) {
-        setWalkInOpen(true);
         setCheckInBusy(false);
         return;
       }
@@ -2070,27 +2130,39 @@ function App() {
         walkInOpen={walkInOpen}
         setWalkInOpen={setWalkInOpen}
         onWalkInConfirm={async (name) => {
-          setCheckInForm((f) => ({ ...f, fullName: name }));
           setWalkInOpen(false);
-          await saveCheckIn({ event: selectedEvent, uniqueId: checkInForm.uniqueId.trim(), fullName: name }).then((result) => {
-            if (result.status !== "duplicate") {
-              setCheckInResult({
-                kind: "walk-in",
-                time: result.record.checkInTime,
-                displayName: name,
-                masked: result.record.maskedUniqueId,
-              });
-              setCheckInForm({ uniqueId: "", fullName: "" });
-              setParticipantPopup({
-                open: true,
-                kind: "checkin",
-                status: "walk-in",
-                displayName: name,
-                time: result.record.checkInTime,
-                masked: result.record.maskedUniqueId,
-              });
+          try {
+            const result = await saveCheckIn({
+              event: selectedEvent,
+              uniqueId: checkInForm.uniqueId.trim(),
+              fullName: name,
+              allowWalkIn: true,
+            });
+            if (result.status === "duplicate") {
+              const t = result.existing.checkInTime;
+              setParticipantPopup({ open: true, kind: "checkin", status: "duplicate", time: t });
+              return;
             }
-          });
+            setCheckInResult({
+              kind: "walk-in",
+              time: result.record.checkInTime,
+              displayName: name,
+              masked: result.record.maskedUniqueId,
+            });
+            setCheckInForm({ uniqueId: "", fullName: "" });
+            setParticipantPopup({
+              open: true,
+              kind: "checkin",
+              status: "walk-in",
+              displayName: name,
+              time: result.record.checkInTime,
+              masked: result.record.maskedUniqueId,
+            });
+          } catch (error) {
+            const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+            setParticipantPopup({ open: true, kind: "checkin", status: "error", errorDetail: detail });
+            console.error("[saveCheckIn walk-in confirm]", error);
+          }
         }}
       />
       </>
