@@ -1,6 +1,6 @@
 import { Component, useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import { AlertTriangle, BarChart3, CalendarPlus, CheckCircle2, ClipboardList, Database, Download, Eye, EyeOff, FilePlus, FileText, KeyRound, Link2, LockKeyhole, LogOut, PlayCircle, QrCode, RefreshCw, ShieldCheck, Trash2, UserPlus, XCircle } from "lucide-react";
+import { AlertTriangle, BarChart3, CalendarPlus, CheckCircle2, ClipboardList, Database, Download, Eye, EyeOff, FilePlus, FileText, History, KeyRound, Link2, LockKeyhole, LogOut, PlayCircle, QrCode, RefreshCw, ShieldCheck, Trash2, UserPlus, XCircle } from "lucide-react";
 
 import "@/App.css";
 import {
@@ -30,6 +30,7 @@ import {
 } from "@/lib/event-store";
 import { onFirebaseModeChange, getFallbackReason, reenableFirestoreMode } from "@/lib/firebase";
 import { observeAuth, signIn, signOutUser, createAdminUser, listAdminUsers } from "@/lib/auth";
+import { AUDIT_ACTIONS, AUDIT_LABEL, listAuditRows, logAudit } from "@/lib/audit";
 
 const BUILD_STAMP = "v3.1-form-gates-2026-05-26";
 import { getKeyFingerprint, regenerateKey } from "@/lib/crypto";
@@ -397,6 +398,13 @@ function ParticipantPopup({ popup, onClose }) {
 
   const cfg = (() => {
     if (popup.kind === "register") {
+      if (popup.status === "error") {
+        return {
+          tone: "error",
+          title: "Could not save your registration",
+          body: `Something went wrong while saving. ${popup.errorDetail || ""} Please show this to the desk team and try once more.`,
+        };
+      }
       if (popup.status === "updated") {
         return {
           tone: "info",
@@ -835,6 +843,84 @@ function ParticipantCheckOut({ event, form, setForm, result, busy, onSubmit }) {
           </button>
         </form>
       </main>
+    </div>
+  );
+}
+
+// Audit log viewer. Reads /audit (admin-only via rules), decrypts the
+// operator email + target label on the way through listAuditRows, renders
+// newest-first table. Refresh button re-queries.
+function AuditLogTab() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await listAuditRows({ limit: 500 });
+      setRows(data);
+    } catch (e) {
+      setError(e?.message || String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { load(); }, []);
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Audit Log</CardTitle>
+          <CardDescription>
+            Append-only record of every admin action — sign-in / sign-out, event create / edit / close / delete / reset, CSV export, reveal / decrypt, key rotation, admin user changes. Operator email is encrypted at rest; the table decrypts it on the way out. Retention 90 days, auto-purged via TTL.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="action-row mb-4" style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <Button type="button" variant="outline" onClick={load} disabled={loading}>
+              {loading ? "Loading..." : "Refresh"}
+            </Button>
+            <span className="text-sm text-gray-500">{rows.length} {rows.length === 1 ? "entry" : "entries"}</span>
+          </div>
+          {error && (
+            <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>
+          )}
+          {!loading && rows.length === 0 && !error && (
+            <p className="text-sm text-gray-500">No audit entries yet. Sign out and back in to see this populate.</p>
+          )}
+          {rows.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Action</TableHead>
+                  <TableHead>Actor</TableHead>
+                  <TableHead>Target</TableHead>
+                  <TableHead>Details</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell style={{ whiteSpace: "nowrap" }}>{formatDateTime(row.at)}</TableCell>
+                    <TableCell>
+                      <span className="badge">{AUDIT_LABEL[row.action] || row.action}</span>
+                    </TableCell>
+                    <TableCell>{row.actorEmail || <span className="text-gray-400">unknown</span>}</TableCell>
+                    <TableCell>{row.targetLabel || row.target || ""}</TableCell>
+                    <TableCell>
+                      {row.details ? (
+                        <code style={{ fontSize: 12 }}>{JSON.stringify(row.details)}</code>
+                      ) : ""}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -1337,6 +1423,12 @@ function App() {
     setCreatingEvent(true);
     try {
       const createdEvent = await createEvent(eventForm);
+      logAudit({
+        action: AUDIT_ACTIONS.EVENT_CREATE,
+        actor: authUser,
+        target: createdEvent.id,
+        targetLabel: createdEvent.title,
+      });
       setSelectedEventId(createdEvent.id);
       setEventForm({
         ...eventDefaults,
@@ -1398,10 +1490,18 @@ function App() {
       // confirmation now.
       setMessage({ type: "", text: "" });
     } catch (error) {
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
       setMessage({
         type: "error",
-        text: "The registration could not be saved. Please retry after checking the selected event.",
+        text: `Registration could not be saved — ${detail}`,
       });
+      setParticipantPopup({
+        open: true,
+        kind: "register",
+        status: "error",
+        errorDetail: detail,
+      });
+      console.error("[saveRegistration]", error);
     } finally {
       setSubmitting(false);
     }
@@ -1460,6 +1560,12 @@ function App() {
     if (!ok) return;
     try {
       await deleteEvent(ev.id);
+      logAudit({
+        action: AUDIT_ACTIONS.EVENT_DELETE,
+        actor: authUser,
+        target: ev.id,
+        targetLabel: ev.title,
+      });
       setMessage({
         type: "success",
         text: `"${ev.title}" deleted along with all related data.`,
@@ -1488,6 +1594,13 @@ function App() {
         await deleteEvent(ev.id);
         count += 1;
       }
+      logAudit({
+        action: AUDIT_ACTIONS.EVENT_DELETE,
+        actor: authUser,
+        target: "ALL",
+        targetLabel: `Wiped ${count} events`,
+        details: { count, scope: "all" },
+      });
       setMessage({
         type: "success",
         text: `Wiped ${count} events and all related data. Admin logins untouched.`,
@@ -1537,6 +1650,12 @@ function App() {
     if (!ok) return;
     try {
       await resetEventData(ev.id);
+      logAudit({
+        action: AUDIT_ACTIONS.EVENT_RESET,
+        actor: authUser,
+        target: ev.id,
+        targetLabel: ev.title,
+      });
       setMessage({ type: "success", text: `Event data reset for "${ev.title}". Event preserved.` });
     } catch (error) {
       const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
@@ -1562,6 +1681,13 @@ function App() {
         eventRegistrations,
         selectedEvent,
       );
+      logAudit({
+        action: AUDIT_ACTIONS.CSV_EXPORT,
+        actor: authUser,
+        target: selectedEvent.id,
+        targetLabel: selectedEvent.title,
+        details: { rows: eventRegistrations.length },
+      });
       setMessage({
         type: "success",
         text: "Encrypted records decrypted in-browser and exported as CSV for the client handoff.",
@@ -1585,6 +1711,12 @@ function App() {
     setKeyBusy(true);
     try {
       const fingerprint = await regenerateKey();
+      logAudit({
+        action: AUDIT_ACTIONS.KEY_ROTATE,
+        actor: authUser,
+        target: null,
+        targetLabel: fingerprint,
+      });
       setKeyFingerprint(fingerprint);
       setDecryptedById({});
       setPrivacyMode(true);
@@ -1795,6 +1927,7 @@ function App() {
     if (!ok) return;
     try {
       await closeEvent(ev.id);
+      logAudit({ action: AUDIT_ACTIONS.EVENT_CLOSE, actor: authUser, target: ev.id, targetLabel: ev.title });
       setMessage({ type: "success", text: `"${ev.title}" deactivated. Attendance report finalized.` });
     } catch (error) {
       const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
@@ -1808,6 +1941,7 @@ function App() {
     if (!ev) return;
     try {
       await reopenEvent(ev.id);
+      logAudit({ action: AUDIT_ACTIONS.EVENT_REOPEN, actor: authUser, target: ev.id, targetLabel: ev.title });
       setMessage({ type: "success", text: `"${ev.title}" activated. Accepting registrations and check-ins again.` });
     } catch (error) {
       const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
@@ -2510,6 +2644,7 @@ function App() {
       items: [
         { id: "security", label: "Security", icon: ShieldCheck, ready: true },
         { id: "users", label: "Admin Users", icon: KeyRound, ready: true },
+        { id: "audit", label: "Audit Log", icon: History, ready: true },
       ],
     },
   ];
@@ -3456,7 +3591,20 @@ function App() {
                   </CardHeader>
                   <CardContent>
                     <div className="action-row mb-2">
-                      <Button type="button" variant="outline" onClick={() => setPrivacyMode((m) => !m)}>
+                      <Button type="button" variant="outline" onClick={() => {
+                        // Log only the masked → revealed transition. Going
+                        // back to masked is uninteresting.
+                        if (privacyMode) {
+                          logAudit({
+                            action: AUDIT_ACTIONS.REVEAL,
+                            actor: authUser,
+                            target: selectedEvent?.id || null,
+                            targetLabel: selectedEvent?.title || "",
+                            details: { rows: eventRegistrations.length },
+                          });
+                        }
+                        setPrivacyMode((m) => !m);
+                      }}>
                         {privacyMode ? <Eye className="mr-2 h-4 w-4" /> : <EyeOff className="mr-2 h-4 w-4" />}
                         {privacyMode ? "Reveal Names" : "Mask Names"}
                       </Button>
@@ -4030,6 +4178,10 @@ function App() {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          <TabsContent value="audit">
+            <AuditLogTab />
           </TabsContent>
         </Tabs>
 

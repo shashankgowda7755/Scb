@@ -57,8 +57,18 @@ service cloud.firestore {
         && hasEncryptedShape(request.resource.data.employeeId)
         && hasEncryptedShape(request.resource.data.email)
         && hasEncryptedShape(request.resource.data.phone)
-        && hasEncryptedShape(request.resource.data.participation)
-        && hasEncryptedShape(request.resource.data.photoConsent)
+        // Back-compat: accept ciphertext OR legacy clear values so
+        // participants on stale browser caches don't silently fail
+        // permission-denied. New bundles ship encrypted strings; older
+        // cached bundles still pass.
+        && (
+          hasEncryptedShape(request.resource.data.participation)
+          || request.resource.data.participation in ['Yes', 'No']
+        )
+        && (
+          hasEncryptedShape(request.resource.data.photoConsent)
+          || request.resource.data.photoConsent is bool
+        )
         && request.resource.data.dedupeHash is string;
       allow delete: if isAdmin();
     }
@@ -94,6 +104,20 @@ service cloud.firestore {
       // Roll-up of registrations + checkins + checkouts. Admin-only end-to-end.
       allow read: if isAdmin();
       allow create, update, delete: if isAdmin();
+    }
+
+    // Audit log — append-only record of admin actions. Reads admin-only;
+    // creates admin-only (callers attach their own auth context). No
+    // updates, no deletes — once written, an audit row is immutable.
+    // Operator email is encrypted at rest (hasEncryptedShape).
+    match /audit/{auditId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.action is string
+        && request.resource.data.actorUid is string
+        && hasEncryptedShape(request.resource.data.actorEmail)
+        && hasEncryptedShape(request.resource.data.targetLabel);
+      allow update, delete: if false;
     }
 
     // Admin user directory. The auth user is the gate; this collection just

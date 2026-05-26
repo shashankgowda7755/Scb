@@ -8,6 +8,7 @@ import {
 } from "firebase/auth";
 import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc } from "firebase/firestore";
 import { firebaseAuth, firebaseConfig, firestoreDb, isDemoMode } from "./firebase";
+import { AUDIT_ACTIONS, logAudit } from "./audit";
 
 const DEMO_USERS_KEY = "scb-demo-users";
 const DEMO_SESSION_KEY = "scb-demo-session";
@@ -85,14 +86,27 @@ export async function signIn(email, password) {
     await signOut(firebaseAuth);
     throw new Error("This account is not authorized. Ask an existing admin to add you.");
   }
-  return { uid: cred.user.uid, email: cred.user.email };
+  const actor = { uid: cred.user.uid, email: cred.user.email };
+  // Fire-and-forget audit write. Failure here cannot break sign-in.
+  logAudit({ action: AUDIT_ACTIONS.SIGN_IN, actor });
+  return actor;
 }
 
 export async function signOutUser() {
+  // Capture actor + log audit BEFORE the actual sign-out — once signOut
+  // resolves the auth token is gone and Firestore rules deny writes.
+  let actor = null;
   if (isDemoMode() || !firebaseAuth) {
+    actor = readDemoSession();
+    if (actor) await logAudit({ action: AUDIT_ACTIONS.SIGN_OUT, actor });
     writeDemoSession(null);
     emitDemo(null);
     return;
+  }
+  const u = firebaseAuth.currentUser;
+  if (u) {
+    actor = { uid: u.uid, email: u.email };
+    await logAudit({ action: AUDIT_ACTIONS.SIGN_OUT, actor });
   }
   await signOut(firebaseAuth);
 }
@@ -136,6 +150,15 @@ export async function createAdminUser({ email, password, createdBy }) {
     email: cleanEmail,
     createdAt: serverTimestamp(),
     createdBy: createdBy || "",
+  });
+  // Audit: record who added this admin and the target email.
+  logAudit({
+    action: AUDIT_ACTIONS.USER_ADD,
+    actor: firebaseAuth?.currentUser
+      ? { uid: firebaseAuth.currentUser.uid, email: firebaseAuth.currentUser.email }
+      : { uid: "", email: createdBy || "" },
+    target: uid,
+    targetLabel: cleanEmail,
   });
   return { uid, email: cleanEmail };
 }
