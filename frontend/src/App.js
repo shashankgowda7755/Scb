@@ -1328,7 +1328,11 @@ function App() {
     let cancelled = false;
     const handle = setTimeout(() => {
       if (cancelled) return;
-      computeAttendance(selectedEventId).catch(() => {});
+      computeAttendance(selectedEventId).catch((error) => {
+        // Surface attendance recomputation failures to the console so we
+        // never silently lose data. Same lesson as the demo-mode swallow.
+        console.error("[computeAttendance]", error);
+      });
     }, 250);
     return () => {
       cancelled = true;
