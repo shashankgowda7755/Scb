@@ -28,7 +28,7 @@ Single source of truth for this repo. Read first whenever resuming work.
 - Form Builder (no-code) per event — 9 field types matching Google Forms parity.
 - Dynamic participant view (`?mode=register` / `checkin` / `checkout`) renders from `event.formFields`.
 - Field-level AES-256-GCM encryption on every PII field before Firestore write.
-- Phase A Firestore rules **DEPLOYED**: admin-only reads on `/registrations`, `/checkins`, `/checkouts`, `/attendance`. Public reads on `/events` only (so QR can resolve event id).
+- Firestore rules **DEPLOYED**: Public READ on `/registrations`, `/checkins`, `/checkouts` (returns ciphertext only — meaningless without the AES key). Admin-only READ on `/attendance`. Public read on `/events`. Anonymous WRITE allowed with shape validation (encrypted-field-or-legacy-clear back-compat). Updated 2026-05-26 because admin-only-read broke anonymous duplicate-check `getDoc` and produced 0% landed registrations during the meeting. See §17 + DEMO-COMPARISON.md §1 row 2 for the updated threat model.
 - Phase D field expansion: `customData[*]`, `department`, `city`, `notes` all encrypted.
 - Per-event activate / deactivate + per-form gates (Reg / Check-In / Checkout ON/OFF).
 - Inactive event = cascaded form pills + participant lockout.
@@ -44,8 +44,21 @@ Single source of truth for this repo. Read first whenever resuming work.
 - Firestore TTL × 4 collections (`registrations`, `checkins`, `checkouts`, `attendance`) needs Console click-through (gcloud blocked on billing without Blaze). Without TTL, manual `Purge Event` still works.
 
 ### Free-tier limits (mitigated, not eliminated)
-- AES master key inlined into JS bundle (`REACT_APP_DATA_KEY`). Mitigated by Phase A rules: key alone can't read Firestore without admin auth.
-- No Cloud Function envelope / KMS / audit log (needs Blaze).
+- AES master key inlined into JS bundle (`REACT_APP_DATA_KEY`). Bundle is also publicly readable now — so the moat is the key, period. Phase B (Cloud Function decrypt + Secret Manager) closes this.
+- No Cloud Function encrypt/decrypt envelope yet (planned, needs Blaze).
+- App-level audit log **SHIPPED** (`/audit` collection): sign-in/out, event create/edit/close/reopen/delete/reset, CSV export, Reveal decrypt, key rotate, admin add. Operator email encrypted at rest. Append-only via rules. View in operator dashboard → Audit Log tab.
+
+### Today's fixes (2026-05-26 — meeting recovery)
+- **Critical:** killed silent demo-mode fallback in `safeFirestoreWrite` that wrote to localStorage and returned fake success when Firestore rejected. Caused 10/10 phantom registrations during client demo.
+- **Critical:** rules loosened to allow public ciphertext read so anonymous duplicate-check `getDoc` doesn't permission-deny.
+- **Critical:** Vercel env vars added (`REACT_APP_FIREBASE_*`, `REACT_APP_DATA_KEY`) to Production + Development scopes. Prior builds relied on stale build cache containing inlined keys.
+- **High:** invalid / missing eventId on participant URL no longer falls back to first available event. Shows explicit "Event link is not valid" page.
+- **High:** `getDoc` → `getDocFromServer` on every dedupe path. Stale SDK cache after admin delete no longer triggers spurious "duplicate" modal.
+- **Medium:** length caps on participant inputs (fullName 200, Bank ID 50, email 254, longtext 5000).
+- **Medium:** 2-stage walk-in check-in flow (confirm → name → write).
+- **Medium:** PROOF.html restored to deploy (was at repo root, never shipped).
+- **Cosmetic:** duplicate-modal diff decrypts prior `participation`/`photoConsent` for display (was showing `enc:v1:...`).
+- **Cosmetic:** login screen wrong-password shows "Wrong email or password" not raw Firebase error.
 
 ---
 
