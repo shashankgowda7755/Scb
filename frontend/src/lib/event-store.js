@@ -185,26 +185,26 @@ async function buildRegistrationRecord(event, formData, previousRecord) {
   const cityCipher = await encryptString(normalizeString(formData.city));
   const notesCipher = await encryptString(normalizeString(formData.notes));
 
-  // customData (Form Builder dynamic fields) — encrypt each STRING value.
-  // Booleans (checkbox fields) stay clear since they leak nothing PII-shaped.
-  // Field keys stay clear so the admin can still iterate the map by key.
+  // customData (Form Builder dynamic fields) — encrypt EVERY value, no
+  // exceptions. Strings encrypt directly (back-compat with pre-this-commit
+  // records). Booleans / numbers / arrays go through JSON.stringify before
+  // encrypt so we can recover the native type on decrypt. Even a Firestore
+  // dump now leaks nothing about who ticked which checkbox.
+  // Field keys stay clear so admin can iterate the map by key.
   const customDataPlain = (formData.customData && typeof formData.customData === "object")
     ? formData.customData
     : {};
   const customDataCipher = {};
   for (const [k, v] of Object.entries(customDataPlain)) {
-    if (typeof v === "string") {
+    if (v === null || v === undefined) {
+      customDataCipher[k] = await encryptString("");
+    } else if (typeof v === "string") {
+      // Stored as raw encrypted string for back-compat with existing records.
       customDataCipher[k] = await encryptString(normalizeString(v));
-    } else if (Array.isArray(v)) {
-      // Multi-select checkbox values. Serialize the array so the encrypt path
-      // sees a single string; decrypt path parses back to array.
-      customDataCipher[k] = await encryptString(
-        JSON.stringify(v.map((x) => String(x))),
-      );
     } else {
-      // booleans (single checkbox) and numbers stay clear; they leak nothing
-      // PII-shaped and admins can iterate the map cheaply.
-      customDataCipher[k] = v;
+      // bool / number / array — JSON.stringify so decrypt path can rehydrate
+      // the native type via JSON.parse.
+      customDataCipher[k] = await encryptString(JSON.stringify(v));
     }
   }
 
@@ -222,10 +222,13 @@ async function buildRegistrationRecord(event, formData, previousRecord) {
     department: departmentCipher,
     city: cityCipher,
     notes: notesCipher,
-    participation: formData.participation === "No" ? "No" : "Yes",
-    photoConsent: Boolean(formData.photoConsent),
+    // All Yes/No + boolean answers are now ALSO encrypted at rest. Even
+    // an attacker dumping Firestore sees `enc:v1:...` for these — no clue
+    // who clicked Yes vs No on photo consent etc.
+    participation: await encryptString(formData.participation === "No" ? "No" : "Yes"),
+    photoConsent: await encryptString(formData.photoConsent ? "true" : "false"),
     customData: customDataCipher,
-    consent: Boolean(formData.consent),
+    consent: await encryptString(formData.consent ? "true" : "false"),
     // Masked previews removed: even partial leaks (first/last 2 chars,
     // initials) are now hidden. The operator dashboard renders bullets
     // until Reveal (Decrypt) is clicked. Empty strings keep the field
@@ -281,26 +284,65 @@ export async function decryptRegistration(record) {
       if (typeof v === "string") {
         try {
           const plain = await decryptString(v);
-          // Multi-select checkbox values were stored as JSON-stringified arrays.
-          // Detect the leading `[` and parse back so the UI sees an array.
-          if (plain && plain.startsWith("[")) {
+          // Try JSON.parse to rehydrate native types (bool / number / array).
+          // Falls back to the raw plain string when parse fails — that path
+          // covers pre-this-commit records where strings were encrypted raw
+          // without a JSON wrapper.
+          if (plain === "") {
+            out[k] = "";
+          } else {
             try {
               const parsed = JSON.parse(plain);
-              out[k] = Array.isArray(parsed) ? parsed : plain;
+              if (
+                typeof parsed === "boolean" ||
+                typeof parsed === "number" ||
+                Array.isArray(parsed)
+              ) {
+                out[k] = parsed;
+              } else if (typeof parsed === "string") {
+                // New-format encrypted string (`JSON.stringify("hello")` →
+                // `"hello"` → encrypt). Use the parsed string.
+                out[k] = parsed;
+              } else {
+                out[k] = plain;
+              }
             } catch {
               out[k] = plain;
             }
-          } else {
-            out[k] = plain;
           }
         } catch (error) {
           out[k] = "[decrypt failed]";
         }
       } else {
+        // Pre-this-commit records may still hold a raw boolean here.
         out[k] = v;
       }
     }
     decrypted.customData = out;
+  }
+  // Top-level booleans were stored as encrypted "Yes"/"No"/"true"/"false"
+  // strings in buildRegistrationRecord. Decrypt + map back to the native
+  // types the UI expects ("Yes"/"No" for participation, bool for the rest).
+  // Pre-this-commit records have these in clear — decryptString passes
+  // non-ciphertext through unchanged, so we only need a typeof check to
+  // avoid mangling legacy values.
+  if (typeof record.participation === "string" && record.participation.startsWith("enc:")) {
+    try {
+      const plain = await decryptString(record.participation);
+      decrypted.participation = plain === "No" ? "No" : "Yes";
+    } catch {
+      decrypted.participation = "Yes";
+    }
+  }
+  for (const field of ["photoConsent", "consent"]) {
+    if (typeof record[field] === "string" && record[field].startsWith("enc:")) {
+      try {
+        const plain = await decryptString(record[field]);
+        decrypted[field] = plain === "true";
+      } catch {
+        decrypted[field] = false;
+      }
+    }
   }
   return decrypted;
 }
