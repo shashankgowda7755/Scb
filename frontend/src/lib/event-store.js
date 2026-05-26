@@ -612,15 +612,13 @@ function subscribeCollection(name, callback, filter) {
 }
 
 async function safeFirestoreWrite(fn) {
-  try {
-    return await fn();
-  } catch (error) {
-    if (error?.code === "permission-denied" || error?.code === "unavailable") {
-      fallbackToDemoMode(`Firestore ${error.code} on write: rules not deployed`);
-      return { __fellBackToDemo: true };
-    }
-    throw error;
-  }
+  // DO NOT swallow permission-denied / unavailable. Previous behaviour
+  // returned __fellBackToDemo:true, the caller then wrote to localStorage,
+  // returned success — the participant saw 'Registration captured' but
+  // Firestore never received the record. Re-throw every error so the UI
+  // surface (handleRegistrationSubmit catch) shows a real failure popup
+  // and the participant retries instead of walking away thinking success.
+  return await fn();
 }
 
 export function getStoreMode() {
