@@ -411,6 +411,13 @@ function ParticipantPopup({ popup, onClose }) {
       };
     }
     if (popup.kind === "checkin") {
+      if (popup.status === "error") {
+        return {
+          tone: "error",
+          title: "Could not record check-in",
+          body: `Something went wrong while saving. ${popup.errorDetail || ""} Please show this to the desk and they will retry from the operator panel.`,
+        };
+      }
       if (popup.status === "duplicate") {
         return {
           tone: "error",
@@ -456,6 +463,13 @@ function ParticipantPopup({ popup, onClose }) {
       };
     }
     if (popup.kind === "checkout") {
+      if (popup.status === "error") {
+        return {
+          tone: "error",
+          title: "Could not record checkout",
+          body: `Something went wrong while saving. ${popup.errorDetail || ""} Please show this to the desk and they will retry from the operator panel.`,
+        };
+      }
       if (popup.status === "duplicate") {
         return {
           tone: "error",
@@ -1538,7 +1552,15 @@ function App() {
           : `${result.displayName || "Attendee"} checked in at ${formatDateTime(result.record.checkInTime)}.`,
       });
     } catch (error) {
-      setMessage({ type: "error", text: "Check-in failed. Retry." });
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+      setMessage({ type: "error", text: `Check-in failed — ${detail}` });
+      setParticipantPopup({
+        open: true,
+        kind: "checkin",
+        status: "error",
+        errorDetail: detail,
+      });
+      console.error("[saveCheckIn]", error);
     } finally {
       setCheckInBusy(false);
     }
@@ -1611,7 +1633,15 @@ function App() {
       };
       setMessage({ type: "success", text: blurb[result.status] || "Checkout recorded." });
     } catch (error) {
-      setMessage({ type: "error", text: "Checkout failed. Retry." });
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+      setMessage({ type: "error", text: `Checkout failed — ${detail}` });
+      setParticipantPopup({
+        open: true,
+        kind: "checkout",
+        status: "error",
+        errorDetail: detail,
+      });
+      console.error("[saveCheckOut]", error);
     } finally {
       setCheckOutBusy(false);
     }
