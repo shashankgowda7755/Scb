@@ -826,7 +826,7 @@ function LoginScreen({ storeMode }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            placeholder="you@tndwwt.org"
+            placeholder="name@example.com"
           />
           <Label htmlFor="login-password">Password</Label>
           <Input
@@ -3896,7 +3896,7 @@ function App() {
                         value={userForm.email}
                         onChange={(e) => setUserForm((f) => ({ ...f, email: e.target.value }))}
                         required
-                        placeholder="staffer@tndwwt.org"
+                        placeholder="name@example.com"
                       />
                     </div>
                     <div>
