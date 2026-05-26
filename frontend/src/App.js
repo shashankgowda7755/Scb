@@ -729,7 +729,7 @@ function App() {
     existingRecord: null,
     pendingRegistration: null,
   });
-  const [qrCodeUrl, setQrCodeUrl] = useState("");
+  const [qrCodeUrl, setQrCodeUrl] = useState({ register: "", checkin: "", checkout: "" });
   const [privacyMode, setPrivacyMode] = useState(true);
   const [copyMessage, setCopyMessage] = useState("");
   const [decryptedById, setDecryptedById] = useState({});
@@ -1016,38 +1016,39 @@ function App() {
   }, [attendanceRows, selectedEventId]);
   const totalRegistrations = registrations.length;
   const shareUrl = selectedEvent ? getEventShareUrl(selectedEvent.id) : "";
+  const checkInUrl = selectedEvent ? getCheckInUrl(selectedEvent.id) : "";
+  const checkOutUrl = selectedEvent ? getCheckOutUrl(selectedEvent.id) : "";
 
   useEffect(() => {
     let isMounted = true;
 
-    if (!shareUrl) {
-      setQrCodeUrl("");
+    if (!selectedEvent) {
+      setQrCodeUrl({ register: "", checkin: "", checkout: "" });
       return undefined;
     }
 
-    QRCode.toDataURL(shareUrl, {
+    const opts = {
       width: 320,
       margin: 1,
-      color: {
-        dark: "#0A0A0A",
-        light: "#ffffff",
-      },
-    })
-      .then((dataUrl) => {
-        if (isMounted) {
-          setQrCodeUrl(dataUrl);
-        }
-      })
-      .catch(() => {
-        if (isMounted) {
-          setQrCodeUrl("");
-        }
-      });
+      color: { dark: "#0A0A0A", light: "#ffffff" },
+    };
+    Promise.all([
+      QRCode.toDataURL(shareUrl, opts).catch(() => ""),
+      QRCode.toDataURL(checkInUrl, opts).catch(() => ""),
+      QRCode.toDataURL(checkOutUrl, opts).catch(() => ""),
+    ]).then(([reg, ci, co]) => {
+      if (!isMounted) return;
+      setQrCodeUrl({ register: reg, checkin: ci, checkout: co });
+    });
 
     return () => {
       isMounted = false;
     };
-  }, [shareUrl]);
+    // selectedEvent is only used inside the early `if (!selectedEvent)` guard;
+    // URL changes already cover dep change. Excluded to avoid re-rendering QR
+    // on every event field tweak.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareUrl, checkInUrl, checkOutUrl]);
 
   useEffect(() => {
     if (!copyMessage) {
@@ -1491,7 +1492,11 @@ function App() {
       await closeEvent(ev.id);
       setMessage({ type: "success", text: `"${ev.title}" deactivated. Attendance report finalized.` });
     } catch (error) {
-      setMessage({ type: "error", text: "Deactivate failed." });
+      // Surface the actual Firestore error code/message so we can debug rule
+      // rejections, network failures, etc. instead of a silent "failed".
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+      setMessage({ type: "error", text: `Deactivate failed — ${detail}` });
+      console.error("[closeEvent]", error);
     }
   }
 
@@ -1502,7 +1507,9 @@ function App() {
       await reopenEvent(ev.id);
       setMessage({ type: "success", text: `"${ev.title}" activated. Accepting registrations and check-ins again.` });
     } catch (error) {
-      setMessage({ type: "error", text: "Activate failed." });
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+      setMessage({ type: "error", text: `Activate failed — ${detail}` });
+      console.error("[reopenEvent]", error);
     }
   }
 
@@ -2447,68 +2454,47 @@ function App() {
 
               <Card className="glass-card">
                 <CardHeader>
-                  <CardTitle>Event QR and Private Link</CardTitle>
+                  <CardTitle>QR codes — one per flow</CardTitle>
                   <CardDescription>
-                    QR encodes the registration URL. Share the link directly via email/Slack, or print the QR for venue signage.
+                    Each of the three participant flows (registration, check-in, checkout) has its own QR. Print them separately, place each at the relevant station.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent>
                   {selectedEvent ? (
-                    <div className="qr-layout">
-                      <div className="qr-panel">
-                        {qrCodeUrl ? (
-                          <img className="qr-image" src={qrCodeUrl} alt={`${selectedEvent.title} QR code`} />
-                        ) : (
-                          <div className="qr-placeholder">QR preview unavailable</div>
-                        )}
-                        {qrCodeUrl && (
-                          <a className="qr-download" href={qrCodeUrl} download={`${selectedEvent.id}-qr.png`}>
-                            <Download className="h-3.5 w-3.5" /> Download PNG
-                          </a>
-                        )}
-                      </div>
-                      <div className="qr-meta">
-                        <div className="summary-item">
-                          <span>Event</span>
-                          <strong>{selectedEvent.title}</strong>
-                        </div>
-                        <div className="summary-item">
-                          <span>Date</span>
-                          <strong>{formatDate(selectedEvent.eventDate)}</strong>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Registration Share Link</Label>
+                    <div className="qr-grid">
+                      {[
+                        { id: "register", title: "Registration", desc: "Scan to register for this event", url: shareUrl, qr: qrCodeUrl.register },
+                        { id: "checkin",  title: "Check-In",     desc: "Scan at the venue entry desk",     url: checkInUrl, qr: qrCodeUrl.checkin },
+                        { id: "checkout", title: "Checkout",     desc: "Scan when leaving the event",      url: checkOutUrl, qr: qrCodeUrl.checkout },
+                      ].map((card) => (
+                        <div className="qr-card" key={card.id}>
+                          <div className="qr-card-head">
+                            <div className="qr-card-title">{card.title}</div>
+                            <div className="qr-card-desc">{card.desc}</div>
+                          </div>
+                          <div className="qr-panel">
+                            {card.qr ? (
+                              <img className="qr-image" src={card.qr} alt={`${selectedEvent.title} ${card.title} QR`} />
+                            ) : (
+                              <div className="qr-placeholder">QR preview unavailable</div>
+                            )}
+                            {card.qr && (
+                              <a className="qr-download" href={card.qr} download={`${selectedEvent.id}-${card.id}-qr.png`}>
+                                <Download className="h-3.5 w-3.5" /> Download PNG
+                              </a>
+                            )}
+                          </div>
                           <div className="link-row">
-                            <div className="link-box">{shareUrl}</div>
-                            <Button type="button" variant="outline" onClick={handleCopyShareLink}>
-                              <Link2 className="mr-2 h-4 w-4" />
-                              Copy
+                            <div className="link-box">{card.url}</div>
+                            <Button type="button" variant="outline" size="sm" onClick={() => copyTextToClipboard(card.url)}>
+                              <Link2 className="mr-2 h-3.5 w-3.5" /> Copy
                             </Button>
                           </div>
-                          {copyMessage && <p className="helper-copy">{copyMessage}</p>}
-                          <a className="helper-copy" href={shareUrl} target="_blank" rel="noreferrer">
-                            Open participant view in a new tab →
+                          <a className="helper-copy" href={card.url} target="_blank" rel="noreferrer">
+                            Open in new tab →
                           </a>
                         </div>
-                        <div className="space-y-2">
-                          <Label>Check-In Desk URL</Label>
-                          <div className="link-row">
-                            <div className="link-box">{getCheckInUrl(selectedEvent.id)}</div>
-                            <Button type="button" variant="outline" onClick={() => copyTextToClipboard(getCheckInUrl(selectedEvent.id))}>
-                              <Link2 className="mr-2 h-4 w-4" /> Copy
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Checkout Desk URL</Label>
-                          <div className="link-row">
-                            <div className="link-box">{getCheckOutUrl(selectedEvent.id)}</div>
-                            <Button type="button" variant="outline" onClick={() => copyTextToClipboard(getCheckOutUrl(selectedEvent.id))}>
-                              <Link2 className="mr-2 h-4 w-4" /> Copy
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
+                      ))}
                     </div>
                   ) : (
                     <div className="empty-state">

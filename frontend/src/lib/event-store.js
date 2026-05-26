@@ -143,6 +143,15 @@ function buildEventRecord(input) {
     description: normalizeString(input.description),
     uniqueIdLabel: normalizeString(input.uniqueIdLabel) || "Bank ID",
     formFields: Array.isArray(input.formFields) ? input.formFields : [],
+    // Optional geo-fence. When all three are present and finite, the
+    // participant browser must report a GPS position within `geoRadiusMeters`
+    // of (geoLat, geoLng) for the submit to be accepted. Stored as numbers;
+    // absent / null = geo-fence off for this event.
+    geoLat: Number.isFinite(Number(input.geoLat)) ? Number(input.geoLat) : null,
+    geoLng: Number.isFinite(Number(input.geoLng)) ? Number(input.geoLng) : null,
+    geoRadiusMeters: Number.isFinite(Number(input.geoRadiusMeters)) && Number(input.geoRadiusMeters) > 0
+      ? Math.round(Number(input.geoRadiusMeters))
+      : null,
     createdAt,
     expiresAt: buildExpiresAt(input.eventDate, retentionDays),
   };
@@ -708,6 +717,9 @@ const EVENT_EDITABLE_KEYS = [
   "registrationEnabled",
   "checkInEnabled",
   "checkOutEnabled",
+  "geoLat",
+  "geoLng",
+  "geoRadiusMeters",
 ];
 
 export async function updateEvent(eventId, patch) {
