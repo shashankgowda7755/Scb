@@ -3,7 +3,9 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
+  getDocsFromServer,
   onSnapshot,
   query,
   setDoc,
@@ -486,7 +488,12 @@ async function saveRegistrationInFirestore({ event, formData, replace }) {
   const dedupeHash = await hashDedupeValue(event.id, dedupeValue);
   const recordId = `${event.id}__${dedupeHash}`;
   const registrationRef = doc(firestoreDb, "registrations", recordId);
-  const existingSnapshot = await getDoc(registrationRef);
+  // Force server fetch (not cache). When admin clicks Reset Data or
+  // Delete Event in one tab, the participant's getDoc in another tab
+  // can return a stale cached snapshot showing the deleted record as
+  // still existing → spurious "duplicate" modal even though the data
+  // was deleted. getDocFromServer bypasses the local SDK cache.
+  const existingSnapshot = await getDocFromServer(registrationRef);
   const existingRecord = existingSnapshot.exists() ? normalizeFirestoreDoc(existingSnapshot) : null;
 
   if (existingRecord && !replace) {
@@ -534,12 +541,12 @@ async function deleteEventCascade(eventId) {
   if (getFirebaseMode() === "firebase") {
     await deleteDoc(doc(firestoreDb, "events", eventId));
     for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
-      const snap = await getDocs(collection(firestoreDb, sub));
-      await Promise.all(
-        snap.docs
-          .filter((d) => d.data().eventId === eventId)
-          .map((d) => deleteDoc(doc(firestoreDb, sub, d.id))),
+      // Server-only enumeration. Stale cache could omit recent writes
+      // and leave orphans behind after the cascade.
+      const snap = await getDocsFromServer(
+        query(collection(firestoreDb, sub), where("eventId", "==", eventId)),
       );
+      await Promise.all(snap.docs.map((d) => deleteDoc(doc(firestoreDb, sub, d.id))));
     }
     return;
   }
@@ -698,12 +705,15 @@ export async function setEventFormEnabled(eventId, formKey, enabled) {
 export async function resetEventData(eventId) {
   if (getFirebaseMode() === "firebase") {
     for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
-      const snap = await getDocs(collection(firestoreDb, sub));
-      await Promise.all(
-        snap.docs
-          .filter((d) => d.data().eventId === eventId)
-          .map((d) => deleteDoc(doc(firestoreDb, sub, d.id))),
+      // Server-only + indexed query. Previously read whole collection
+      // then client-side filtered, which (a) read stale cache, (b)
+      // burned reads at scale, (c) could miss freshly-written docs not
+      // yet synced. getDocsFromServer + where(eventId) is the precise
+      // and fresh path.
+      const snap = await getDocsFromServer(
+        query(collection(firestoreDb, sub), where("eventId", "==", eventId)),
       );
+      await Promise.all(snap.docs.map((d) => deleteDoc(doc(firestoreDb, sub, d.id))));
     }
     return;
   }
@@ -796,7 +806,11 @@ async function findRegistrationByUniqueId(event, uniqueId) {
   const dedupeHash = await hashDedupeValue(event.id, dedupeValue);
   const recordId = `${event.id}__${dedupeHash}`;
   if (getFirebaseMode() === "firebase") {
-    const snap = await getDoc(doc(firestoreDb, "registrations", recordId));
+    // Bypass local SDK cache. Stale cached snapshots after admin
+    // Reset / Delete would falsely report the record still exists and
+    // trigger spurious "duplicate" modals or wrong walk-in / regular
+    // check-in classification.
+    const snap = await getDocFromServer(doc(firestoreDb, "registrations", recordId));
     return snap.exists() ? { record: normalizeFirestoreDoc(snap), dedupeHash } : { record: null, dedupeHash };
   }
   const store = loadDemoStore();
@@ -820,7 +834,11 @@ async function readEventDoc(eventId) {
 
 async function readCollectionDoc(name, id) {
   if (getFirebaseMode() === "firebase") {
-    const snap = await getDoc(doc(firestoreDb, name, id));
+    // Server-only read. Same rationale as findRegistrationByUniqueId
+    // and saveRegistrationInFirestore: never let a cached snapshot
+    // produce a false "already exists" duplicate detection after the
+    // doc was deleted server-side.
+    const snap = await getDocFromServer(doc(firestoreDb, name, id));
     return snap.exists() ? normalizeFirestoreDoc(snap) : null;
   }
   const store = loadDemoStore();
