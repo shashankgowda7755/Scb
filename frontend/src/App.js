@@ -258,6 +258,11 @@ function validateRegistrationForm(event, formData) {
   if (!formData.fullName.trim()) {
     return "Participant name is required.";
   }
+  // Length cap — encrypting 10k+ char inputs is pointless and would
+  // bloat the Firestore doc. 200 chars covers any real person's name.
+  if (formData.fullName.trim().length > 200) {
+    return "Participant name must be 200 characters or fewer.";
+  }
 
   const uidLabel = event.uniqueIdLabel || "Bank ID";
 
@@ -265,8 +270,8 @@ function validateRegistrationForm(event, formData) {
     return `${uidLabel} is required.`;
   }
 
-  if (!/^[A-Z0-9._-]{3,}$/i.test(formData.employeeId.trim())) {
-    return `${uidLabel} must be at least 3 characters and use letters, numbers, dots, hyphens, or underscores.`;
+  if (!/^[A-Z0-9._-]{3,50}$/i.test(formData.employeeId.trim())) {
+    return `${uidLabel} must be 3-50 characters and use letters, numbers, dots, hyphens, or underscores.`;
   }
 
   // Validate required custom fields per event.formFields schema.
@@ -290,6 +295,12 @@ function validateRegistrationForm(event, formData) {
       if (fld.type === "phone" && !/^[0-9+\-()\s]{7,20}$/.test(v.trim())) {
         return `${fld.label}: enter a valid phone number.`;
       }
+      // Per-field-type length caps to prevent payload bloat / accidental
+      // 10k-char pastes that would balloon the encrypted Firestore doc.
+      const cap = fld.type === "longtext" ? 5000 : 500;
+      if (v.length > cap) {
+        return `${fld.label}: must be ${cap} characters or fewer.`;
+      }
     }
   }
 
@@ -297,6 +308,9 @@ function validateRegistrationForm(event, formData) {
   // schema. Only validate the format when the field has a value.
   if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) {
     return "Enter a valid email address or leave it blank.";
+  }
+  if (formData.email.trim().length > 254) {
+    return "Email must be 254 characters or fewer (RFC 5321 limit).";
   }
 
   if (formData.phone.trim() && !/^[0-9+\-()\s]{7,20}$/.test(formData.phone.trim())) {
