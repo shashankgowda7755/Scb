@@ -46,8 +46,13 @@ service cloud.firestore {
     }
 
     match /registrations/{registrationId} {
-      // PHASE A: admin-only read. Operator dashboard requires sign-in.
-      allow read: if isAdmin();
+      // Public read of ciphertext. Anonymous participants need this to
+      // detect their own duplicate registrations (the client calls
+      // getDoc before setDoc to surface the "you already registered"
+      // modal). PII is AES-256-GCM ciphertext — a reader sees only
+      // `enc:v1:...` strings. Decryption requires the operator AES key.
+      // The dedupeHash is SHA-256 with per-event salt, irreversible.
+      allow read: if true;
       // Public write — anonymous participants submit ciphertext via the QR.
       allow create, update: if
         request.resource.data.eventId is string
@@ -74,7 +79,9 @@ service cloud.firestore {
     }
 
     match /checkins/{checkInId} {
-      allow read: if isAdmin();
+      // Public read of ciphertext (same rationale as /registrations).
+      // Required so anonymous check-in can detect "already checked in".
+      allow read: if true;
       allow create: if
         request.resource.data.eventId is string
         && isValidEventRef(request.resource.data.eventId)
@@ -88,7 +95,8 @@ service cloud.firestore {
     }
 
     match /checkouts/{checkOutId} {
-      allow read: if isAdmin();
+      // Public read of ciphertext (same rationale as /registrations).
+      allow read: if true;
       allow create: if
         request.resource.data.eventId is string
         && isValidEventRef(request.resource.data.eventId)
