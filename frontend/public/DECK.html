@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SCB Event Platform — Security Demo</title>
+<style>
+  :root {
+    --ink: #0A0A0A;
+    --paper: #FFFFFF;
+    --muted: #6B7280;
+    --line: #E5E7EB;
+    --orange: #FF6B1A;
+    --orange-soft: #FFF1E6;
+    --green: #16A34A;
+    --red: #DC2626;
+    --code-bg: #F4F4F5;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    height: 100%;
+    overflow: hidden;
+  }
+  .deck { width: 100vw; height: 100vh; position: relative; }
+  .slide {
+    position: absolute; inset: 0;
+    padding: 6vh 8vw;
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    animation: fade 0.3s ease;
+  }
+  .slide.active { display: flex; }
+  @keyframes fade {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* typography */
+  .eyebrow {
+    font-size: 14px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--orange); font-weight: 600; margin-bottom: 16px;
+  }
+  h1 { font-size: 64px; line-height: 1.05; margin: 0 0 24px; letter-spacing: -0.02em; }
+  h2 { font-size: 44px; line-height: 1.1; margin: 0 0 24px; letter-spacing: -0.015em; }
+  h3 { font-size: 28px; line-height: 1.2; margin: 0 0 16px; font-weight: 600; }
+  p, li { font-size: 22px; line-height: 1.5; color: var(--ink); }
+  .lead { font-size: 26px; color: var(--muted); margin-bottom: 32px; }
+  .muted { color: var(--muted); }
+  .accent { color: var(--orange); font-weight: 600; }
+  ul { padding-left: 24px; margin: 16px 0; }
+  li { margin: 12px 0; }
+  li::marker { color: var(--orange); }
+
+  /* layout helpers */
+  .two-col {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 48px;
+    align-items: start;
+  }
+  .card {
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 24px; background: var(--paper);
+  }
+  .card.orange { border-color: var(--orange); background: var(--orange-soft); }
+  .card h3 { color: var(--orange); margin-bottom: 12px; }
+
+  /* code & ciphertext */
+  code, pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 16px;
+    background: var(--code-bg);
+    border-radius: 6px;
+    padding: 2px 8px;
+    color: var(--ink);
+  }
+  pre {
+    padding: 16px 20px;
+    overflow-x: auto;
+    line-height: 1.5;
+    border-left: 3px solid var(--orange);
+  }
+  .cipher { color: var(--orange); word-break: break-all; }
+  .plain { color: var(--green); }
+
+  /* tables */
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 18px; }
+  th, td {
+    text-align: left; padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  th {
+    color: var(--muted); font-weight: 600; font-size: 14px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  td.check { color: var(--green); font-weight: 600; }
+  td.cross { color: var(--red); font-weight: 600; }
+  td.warn  { color: #B45309; font-weight: 600; }
+  td.scb { color: var(--orange); font-weight: 700; }
+
+  /* nav */
+  .hud {
+    position: fixed; bottom: 24px; right: 32px;
+    display: flex; align-items: center; gap: 16px;
+    font-size: 14px; color: var(--muted);
+    background: var(--paper); padding: 8px 14px;
+    border: 1px solid var(--line); border-radius: 999px;
+  }
+  .hud button {
+    border: none; background: transparent; cursor: pointer;
+    color: var(--ink); font-size: 18px; padding: 4px 8px;
+  }
+  .hud button:hover { color: var(--orange); }
+  .progress {
+    position: fixed; top: 0; left: 0; height: 3px;
+    background: var(--orange);
+    transition: width 0.3s ease;
+  }
+  .brand {
+    position: fixed; top: 24px; left: 32px;
+    font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); font-weight: 600;
+  }
+  .brand .dot { color: var(--orange); }
+
+  /* analogy boxes */
+  .envelope-row {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 24px;
+  }
+  .envelope-card {
+    border: 2px solid var(--line); border-radius: 16px; padding: 32px;
+    text-align: center;
+  }
+  .envelope-card.bad { border-color: var(--red); background: #FEF2F2; }
+  .envelope-card.good { border-color: var(--green); background: #F0FDF4; }
+  .envelope-card .icon { font-size: 48px; margin-bottom: 16px; }
+  .envelope-card h3 { font-size: 24px; margin-bottom: 12px; }
+  .envelope-card.bad h3 { color: var(--red); }
+  .envelope-card.good h3 { color: var(--green); }
+  .envelope-card p { font-size: 18px; color: var(--ink); margin: 0; }
+
+  /* hero numbers */
+  .stat-row { display: flex; gap: 64px; margin-top: 32px; }
+  .stat .num {
+    font-size: 56px; font-weight: 700; color: var(--orange);
+    line-height: 1; letter-spacing: -0.02em;
+  }
+  .stat .label { font-size: 16px; color: var(--muted); margin-top: 8px; }
+
+  /* badges */
+  .badge {
+    display: inline-block; padding: 4px 10px; border-radius: 999px;
+    font-size: 13px; font-weight: 600;
+    background: var(--orange-soft); color: var(--orange);
+    margin-right: 8px;
+  }
+
+  /* QR / phone mock */
+  .phone-mock {
+    width: 280px; height: 540px; border: 8px solid var(--ink); border-radius: 36px;
+    padding: 24px; display: flex; flex-direction: column; gap: 16px;
+    background: var(--paper); margin: 0 auto;
+  }
+  .phone-mock .field {
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 12px; font-size: 14px; color: var(--muted);
+  }
+  .phone-mock .submit {
+    margin-top: auto; background: var(--orange); color: var(--paper);
+    padding: 14px; border-radius: 8px; font-weight: 600; text-align: center;
+  }
+
+  /* print */
+  @media print {
+    .hud, .progress, .brand { display: none; }
+    .slide { display: flex !important; page-break-after: always; height: 100vh; }
+  }
+</style>
+</head>
+<body>
+
+<div class="brand">SCB Event Platform<span class="dot"> ·</span> Security Demo</div>
+<div class="progress" id="progress"></div>
+
+<div class="deck" id="deck">
+
+  <!-- SLIDE 1: Title -->
+  <section class="slide active">
+    <div class="eyebrow">Standard Chartered · CSR Volunteer Registration</div>
+    <h1>A registration platform built like a&nbsp;bank.</h1>
+    <p class="lead">Encrypted on the phone. Stored as ciphertext. Visible only to authorized SCB operators. Auto-purged after the event.</p>
+    <div class="stat-row">
+      <div class="stat">
+        <div class="num">AES-256</div>
+        <div class="label">GCM encryption, browser-side</div>
+      </div>
+      <div class="stat">
+        <div class="num">0</div>
+        <div class="label">PII fields in cleartext at rest</div>
+      </div>
+      <div class="stat">
+        <div class="num">90d</div>
+        <div class="label">default retention, auto-delete</div>
+      </div>
+      <div class="stat">
+        <div class="num">1</div>
+        <div class="label">vendor: Google Firebase</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 2: The problem with Google Forms -->
+  <section class="slide">
+    <div class="eyebrow">The Problem</div>
+    <h2>Google Forms wasn't built for bank data.</h2>
+    <div class="two-col">
+      <div>
+        <ul>
+          <li>Responses land in a Google Sheet — <span class="accent">plaintext</span>, cell by cell.</li>
+          <li>Anyone with the share link can read names, employee IDs, phone numbers.</li>
+          <li>No field-level encryption. No per-event retention. No access audit.</li>
+          <li>Data lives wherever Google chooses — typically <span class="accent">US multi-region</span>, not India.</li>
+          <li>One sheet leak = entire roster exposed.</li>
+        </ul>
+      </div>
+      <div class="card orange">
+        <h3>What InfoSec sees today</h3>
+        <pre style="background: transparent; padding: 0; border: none;">Full Name:    <span class="plain">Mukesh Kumar</span>
+Employee ID:  <span class="plain">SC-48201</span>
+Email:        <span class="plain">mukesh@sc.com</span>
+Phone:        <span class="plain">+91-98765-43210</span>
+Photo OK:     <span class="plain">Yes</span></pre>
+        <p class="muted" style="margin-top: 16px; font-size: 16px;">Anyone with sheet access reads this. Including Google staff.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 3: Same UX, different backend -->
+  <section class="slide">
+    <div class="eyebrow">The Approach</div>
+    <h2>Same volunteer experience.<br/>Bank-grade handling underneath.</h2>
+    <div class="two-col" style="margin-top: 32px;">
+      <div class="phone-mock">
+        <div style="font-size: 12px; color: var(--muted); text-align: center;">scbv1-eight.vercel.app</div>
+        <h3 style="font-size: 18px; margin: 0;">Quiz Calendar CSR — Chennai</h3>
+        <div class="field">Full Name</div>
+        <div class="field">Bank ID</div>
+        <div class="field">Email</div>
+        <div class="field">Phone</div>
+        <div class="submit">Submit Registration</div>
+      </div>
+      <div>
+        <h3>Two seconds to register</h3>
+        <ul>
+          <li>Scan QR at the venue.</li>
+          <li>Type name + Bank ID.</li>
+          <li>Hit submit.</li>
+        </ul>
+        <p style="margin-top: 24px;">Same as Google Forms from the volunteer's side. <span class="accent">The difference is what happens after Submit.</span></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 4: What's actually in the database -->
+  <section class="slide">
+    <div class="eyebrow">Live Demo · Point 1</div>
+    <h2>What's actually in the database.</h2>
+    <p class="lead">Open Firebase Console → registrations → click any document. This is the entire record:</p>
+    <pre>fullName:    <span class="cipher">enc:v1:Wq3kKjz9P...==.LmN8Y2QxV4hT...==</span>
+employeeId:  <span class="cipher">enc:v1:8aZc1q0Tn...==.RhKp6mY3uXw...==</span>
+email:       <span class="cipher">enc:v1:Pq5wEt9rUv...==.cN2bV6mTx8Lk...==</span>
+phone:       <span class="cipher">enc:v1:Lk4nM7yPaC...==.uX9hZ2qFt1Bw...==</span>
+photoConsent: <span class="cipher">enc:v1:Yt8eQ2mNvX...==.kL6bP3uHzW1...==</span>
+dedupeHash:   <span class="plain">a3f7e92c1b4d6e8f0a2c4e6f8a9b</span>
+eventId:      <span class="plain">scb-quiz-chennai-lq8k2m</span>
+expiresAt:    <span class="plain">2026-08-09T00:00:00.000Z</span></pre>
+    <p style="margin-top: 24px;">Even the <span class="accent">yes/no photo consent</span> is encrypted. A breach attacker cannot tell who clicked yes vs no.</p>
+  </section>
+
+  <!-- SLIDE 5: The reveal flow -->
+  <section class="slide">
+    <div class="eyebrow">Live Demo · Point 2</div>
+    <h2>The operator has to <em>deliberately</em> reveal.</h2>
+    <div class="two-col">
+      <div class="card">
+        <h3>Default view — masked</h3>
+        <pre style="background: transparent; padding: 0; border: none;">Name      Email     Phone
+•••       •••       •••
+•••       •••       •••
+•••       •••       •••</pre>
+        <p class="muted" style="margin-top: 16px;">No half-leaks. No initials. No first-2-chars.</p>
+      </div>
+      <div class="card orange">
+        <h3>After Reveal click</h3>
+        <pre style="background: transparent; padding: 0; border: none;"><span class="plain">Mukesh Kumar</span>
+<span class="plain">mukesh@sc.com</span>
+<span class="plain">+91-98765-43210</span></pre>
+        <p class="muted" style="margin-top: 16px;">Plaintext only on deliberate, audit-logged action.</p>
+      </div>
+    </div>
+    <p style="margin-top: 32px;">Sign out. Open Incognito. Try to read the same data: <span class="accent">permission denied</span>. The database refuses anonymous access. Even with the Firebase project ID.</p>
+  </section>
+
+  <!-- SLIDE 6: Security model in plain English -->
+  <section class="slide">
+    <div class="eyebrow">The Model</div>
+    <h2>Explained the way you'd explain it to your parents.</h2>
+    <div class="envelope-row">
+      <div class="envelope-card bad">
+        <div class="icon">📄</div>
+        <h3>Google Forms</h3>
+        <p>Data arrives in a clear plastic bag, dropped in an unlocked drawer. Anyone walking past can read it.</p>
+      </div>
+      <div class="envelope-card good">
+        <div class="icon">✉️🔒</div>
+        <h3>SCB Platform</h3>
+        <p>Each registration is a sealed envelope. The phone seals it before posting. Stored in a vault. Only authorized operators have a key. Opening leaves a trace. Envelopes auto-shred after 90 days.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 7: The encryption algorithm -->
+  <section class="slide">
+    <div class="eyebrow">How it works</div>
+    <h2>AES-256-GCM. Same as US top-secret.</h2>
+    <ul>
+      <li><strong>AES-256-GCM</strong> — the same standard the US government uses for top-secret classified data. Banks use it. WhatsApp uses it. Public algorithm, no known break in 20+ years.</li>
+      <li><strong>Browser-side encryption</strong> — the volunteer's phone encrypts the data using the <em>browser's built-in</em> Web Crypto API. No third-party library. No CDN. No supply-chain risk.</li>
+      <li><strong>Per-record IV</strong> — every registration gets a fresh 96-bit random initialization vector. Same name, encrypted twice, produces totally different ciphertext.</li>
+      <li><strong>One-way dedupe hash</strong> — duplicate detection works via SHA-256(eventId + employeeId). Irreversible. We can detect duplicates without ever storing the ID.</li>
+    </ul>
+    <p style="margin-top: 24px;" class="muted">Run the live proof at <code>scbv1-eight.vercel.app/PROOF.html</code> — paste any text, encrypt, decrypt, watch it fail with a wrong key.</p>
+  </section>
+
+  <!-- SLIDE 8: Comparison table -->
+  <section class="slide">
+    <div class="eyebrow">Head to Head</div>
+    <h2>Where each platform stands.</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th>Google Forms</th>
+          <th>MS Forms</th>
+          <th>Typeform</th>
+          <th>SCB Platform</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Encryption at rest (field-level)</td>
+          <td class="cross">✗</td>
+          <td class="cross">✗</td>
+          <td class="cross">✗</td>
+          <td class="scb">✓ AES-256-GCM</td>
+        </tr>
+        <tr>
+          <td>Encrypt before leaving browser</td>
+          <td class="cross">✗</td>
+          <td class="cross">✗</td>
+          <td class="cross">✗</td>
+          <td class="scb">✓</td>
+        </tr>
+        <tr>
+          <td>Allowlist + 2FA-ready admin</td>
+          <td class="warn">Workspace only</td>
+          <td class="warn">Tenant only</td>
+          <td class="warn">Seat only</td>
+          <td class="scb">✓ Double-gate</td>
+        </tr>
+        <tr>
+          <td>Data residency — India (asia-south1)</td>
+          <td class="cross">✗ US/multi</td>
+          <td class="warn">Config</td>
+          <td class="cross">✗ US</td>
+          <td class="scb">✓ Mumbai</td>
+        </tr>
+        <tr>
+          <td>Per-event auto-delete</td>
+          <td class="cross">✗</td>
+          <td class="cross">✗</td>
+          <td class="warn">Workspace-wide</td>
+          <td class="scb">✓ 90d default</td>
+        </tr>
+        <tr>
+          <td>HSTS preload + strict CSP</td>
+          <td class="warn">Default</td>
+          <td class="warn">Default</td>
+          <td class="warn">Default</td>
+          <td class="scb">✓ Locked</td>
+        </tr>
+        <tr>
+          <td>Open source code, auditable</td>
+          <td class="cross">✗</td>
+          <td class="cross">✗</td>
+          <td class="cross">✗</td>
+          <td class="scb">✓</td>
+        </tr>
+        <tr>
+          <td>Vendor lock-in</td>
+          <td class="cross">High</td>
+          <td class="cross">High</td>
+          <td class="cross">High</td>
+          <td class="scb">Low</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- SLIDE 9: Open source -->
+  <section class="slide">
+    <div class="eyebrow">Trust by Verification</div>
+    <h2>Every line of code is open.</h2>
+    <div class="two-col">
+      <div>
+        <p>When you buy Typeform or use Google Forms, you trust a black box. Their word that they handle data correctly. <span class="accent">You can't verify.</span></p>
+        <p>Here you don't have to trust. <span class="accent">You can verify.</span></p>
+        <ul>
+          <li>Full source on GitHub.</li>
+          <li>SCB InfoSec can audit every line.</li>
+          <li>External auditors can review and sign off.</li>
+          <li>SCB can fork and self-host tomorrow if needed.</li>
+          <li>Encryption library = browser-native, not custom.</li>
+        </ul>
+      </div>
+      <div class="card orange">
+        <h3>Live proof</h3>
+        <p style="margin: 0;">Open <code>PROOF.html</code> — paste text, encrypt, see ciphertext, decrypt with the right key, watch it fail with the wrong key.</p>
+        <p class="muted" style="margin-top: 16px; font-size: 16px;">Not marketing slides. Math you can run yourself, in any browser, right now.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 10: One-vendor procurement -->
+  <section class="slide">
+    <div class="eyebrow">For Procurement</div>
+    <h2>One vendor. One contract. One review.</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Approval Bottleneck</th>
+          <th>Multi-vendor SaaS</th>
+          <th>SCB Platform (Firebase)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Vendor risk review</td><td>2–4 vendors</td><td class="scb">1 vendor</td></tr>
+        <tr><td>DPA signing</td><td>2–4 contracts</td><td class="scb">1 contract</td></tr>
+        <tr><td>Data-residency attestation</td><td>Multiple</td><td class="scb">Mumbai · asia-south1</td></tr>
+        <tr><td>Breach-notification SLA chain</td><td>2–4 chains</td><td class="scb">1 chain</td></tr>
+        <tr><td>InfoSec questionnaire</td><td>2–4×</td><td class="scb">1×</td></tr>
+        <tr><td>Billing line items</td><td>2–4</td><td class="scb">1</td></tr>
+      </tbody>
+    </table>
+    <p style="margin-top: 24px;">SCB approval cycle: ~4–8 weeks per new vendor. <span class="accent">Cutting to one vendor saves a full procurement cycle.</span></p>
+  </section>
+
+  <!-- SLIDE 11: Threat model -->
+  <section class="slide">
+    <div class="eyebrow">Threat Model</div>
+    <h2>What an attacker can <em>actually</em> do.</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Attack</th>
+          <th>Outcome today</th>
+          <th>Defense</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Firestore database dump</td>
+          <td class="scb">Ciphertext only</td>
+          <td>AES-256 + admin-only reads</td>
+        </tr>
+        <tr>
+          <td>Anonymous database scrape</td>
+          <td class="scb">Permission denied</td>
+          <td>Firestore rules</td>
+        </tr>
+        <tr>
+          <td>Network MITM</td>
+          <td class="scb">Ciphertext only</td>
+          <td>TLS + HSTS preload + encrypt-on-submit</td>
+        </tr>
+        <tr>
+          <td>Iframe phishing (clickjacking)</td>
+          <td class="scb">Blocked</td>
+          <td>X-Frame-Options DENY</td>
+        </tr>
+        <tr>
+          <td>Inspect source / extract Firebase API key</td>
+          <td class="scb">Useless without allowlisted account</td>
+          <td>Public-by-design; rules are the gate</td>
+        </tr>
+        <tr>
+          <td>Phished operator + extract bundled AES key</td>
+          <td class="warn">Full decrypt (worst case)</td>
+          <td><strong>Phase B fix in flight</strong> — Secret Manager + Cloud Function</td>
+        </tr>
+        <tr>
+          <td>DB auto-purge of dormant data</td>
+          <td class="scb">90-day TTL configured</td>
+          <td>Per-event retention setting</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- SLIDE 12: Honest gaps -->
+  <section class="slide">
+    <div class="eyebrow">We say it before InfoSec does</div>
+    <h2>What's not perfect — yet.</h2>
+    <div class="two-col">
+      <div>
+        <h3 style="color: var(--orange);">Three known gaps</h3>
+        <ul>
+          <li><strong>AES key in JS bundle.</strong> A phished operator + devtools = full decrypt. <span class="muted">Fix: Phase B Secret Manager + Cloud Function. ~1 week.</span></li>
+          <li><strong>2FA not enforced on operator accounts.</strong> <span class="muted">Fix: flip Firebase Auth setting. ~1 hour.</span></li>
+          <li><strong>Auto-delete index pending console click.</strong> <span class="muted">Fix: one button in Firebase Console.</span></li>
+        </ul>
+      </div>
+      <div>
+        <h3>None of these exist on Google Forms either.</h3>
+        <p>Google Forms doesn't attempt encryption at all. The question on this platform isn't <em>"is it perfect today"</em> — it's <em>"is it on a credible path to bank-grade."</em></p>
+        <p class="accent">Code is open. Plan is written. Trajectory is real.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 13: Roadmap -->
+  <section class="slide">
+    <div class="eyebrow">What's Next</div>
+    <h2>Hardening roadmap.</h2>
+    <table>
+      <thead>
+        <tr><th>Phase</th><th>What ships</th><th>Effort</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>A — Done</strong></td><td>Admin-only DB reads. Full ciphertext coverage. Browser security headers.</td><td class="scb">Shipped</td></tr>
+        <tr><td><strong>B</strong></td><td>Move AES key to Google Secret Manager. Decrypt via Cloud Function.</td><td>~1 week</td></tr>
+        <tr><td><strong>C</strong></td><td>Enable Firebase Auth 2FA. Add SCB SSO if needed.</td><td>~1 day</td></tr>
+        <tr><td><strong>D — Done</strong></td><td>Every PII field encrypted, including booleans + customData.</td><td class="scb">Shipped</td></tr>
+        <tr><td><strong>E</strong></td><td>Key rotation that re-encrypts existing data.</td><td>~3 days</td></tr>
+        <tr><td><strong>F</strong></td><td>Decrypt audit log — who saw what, when.</td><td>~2 days</td></tr>
+        <tr><td><strong>G</strong></td><td>Formal pen-test + SOC 2 Type II.</td><td>External audit</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- SLIDE 14: The Ask -->
+  <section class="slide">
+    <div class="eyebrow">The Ask</div>
+    <h2>One pilot event. InfoSec watching.</h2>
+    <div class="two-col">
+      <div>
+        <ul>
+          <li>Pick one CSR event in the next 60 days.</li>
+          <li>Agree the success criteria upfront with InfoSec.</li>
+          <li>Run it on this platform.</li>
+          <li>After the event, review the audit together.</li>
+          <li>Decide: expand to all CSR events, or identify gaps and fix before next attempt.</li>
+        </ul>
+      </div>
+      <div class="card orange">
+        <h3>Why this beats a 6-month review</h3>
+        <p>Real data, real volunteers, real metrics. One event tells you more than ten compliance documents. And it's reversible — if anything goes wrong, the data was encrypted the whole time.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- SLIDE 15: Q&A / Contact -->
+  <section class="slide" style="justify-content: center; text-align: center;">
+    <div class="eyebrow" style="text-align: center;">Thank you</div>
+    <h1 style="text-align: center;">Questions?</h1>
+    <p class="lead" style="text-align: center;">Live platform: <code>scbv1-eight.vercel.app</code><br/>Live crypto proof: <code>scbv1-eight.vercel.app/PROOF.html</code><br/>Source: <code>github.com/shashankgowda7755/Scb</code></p>
+  </section>
+
+</div>
+
+<div class="hud">
+  <button id="prev">◀</button>
+  <span id="counter">1 / 15</span>
+  <button id="next">▶</button>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const progress = document.getElementById('progress');
+  const counter = document.getElementById('counter');
+  let idx = 0;
+
+  function show(n) {
+    idx = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+    progress.style.width = ((idx + 1) / slides.length * 100) + '%';
+    counter.textContent = (idx + 1) + ' / ' + slides.length;
+    history.replaceState(null, '', '#' + (idx + 1));
+  }
+
+  document.getElementById('prev').onclick = () => show(idx - 1);
+  document.getElementById('next').onclick = () => show(idx + 1);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { show(idx + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { show(idx - 1); e.preventDefault(); }
+    else if (e.key === 'Home') { show(0); }
+    else if (e.key === 'End') { show(slides.length - 1); }
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  // click to advance, except on buttons
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.hud') || e.target.tagName === 'A' || e.target.tagName === 'CODE') return;
+    show(idx + 1);
+  });
+
+  // load slide from hash
+  const initial = parseInt((location.hash || '#1').slice(1), 10);
+  if (!isNaN(initial) && initial >= 1 && initial <= slides.length) show(initial - 1);
+  else show(0);
+</script>
+
+</body>
+</html>
