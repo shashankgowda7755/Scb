@@ -933,12 +933,32 @@ function LoginScreen({ storeMode }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (!email.trim() || !password) {
+      setErr("Enter your work email and password to sign in.");
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
       await signIn(email, password);
     } catch (e2) {
-      setErr(e2?.message || String(e2));
+      // Map raw Firebase Auth errors to user-friendly copy. The bare
+      // 'Firebase: Error (auth/invalid-credential).' string is confusing
+      // to non-technical operators.
+      const raw = String(e2?.code || e2?.message || e2 || "");
+      let friendly;
+      if (raw.includes("invalid-credential") || raw.includes("wrong-password") || raw.includes("user-not-found")) {
+        friendly = "Wrong email or password. Check both and try again.";
+      } else if (raw.includes("too-many-requests")) {
+        friendly = "Too many failed attempts. Wait a minute and try again.";
+      } else if (raw.includes("network-request-failed")) {
+        friendly = "Network issue reaching the sign-in service. Check your connection.";
+      } else if (raw.includes("not authorized") || raw.includes("not on the allowlist")) {
+        friendly = "This account is not authorised. Ask an existing admin to add you.";
+      } else {
+        friendly = e2?.message || String(e2);
+      }
+      setErr(friendly);
     } finally {
       setBusy(false);
     }
@@ -1203,9 +1223,16 @@ function App() {
     }
 
     const urlEventId = new URLSearchParams(window.location.search).get("event");
-    const nextSelected = events.find((event) => event.id === urlEventId)?.id
-      || events.find((event) => event.id === selectedEventId)?.id
-      || events[0].id;
+    // For participants, NEVER silently fall back to a different event. If
+    // their QR link points to a missing event, leave selectedEventId empty
+    // so the UI renders an "event not found" page instead of registering
+    // them against an arbitrary other event.
+    const matchedById = events.find((event) => event.id === urlEventId)?.id || "";
+    const nextSelected = participantMode
+      ? matchedById  // strict match or nothing
+      : (matchedById
+          || events.find((event) => event.id === selectedEventId)?.id
+          || events[0].id);
 
     setSelectedEventId(nextSelected);
 
@@ -1213,7 +1240,7 @@ function App() {
     if (hash === "register") setActiveTab("registrations");
     else if (hash === "checkin") setActiveTab("checkin");
     else if (hash === "checkout") setActiveTab("checkout");
-  }, [events, selectedEventId]);
+  }, [events, selectedEventId, participantMode]);
 
   const selectedEvent = events.find((event) => event.id === selectedEventId) || null;
   const eventRegistrations = registrations.filter((r) => r.eventId === selectedEventId);
@@ -2227,7 +2254,19 @@ function App() {
 
   const participantBlock = (() => {
     if (!participantMode) return null;
-    // Loading: events not arrived yet, wait until subscribeEvents fires.
+    // Events list arrived but URL's ?event= doesn't match any of them: this
+    // is the "wrong QR / mistyped link / deleted event" case. Show an
+    // explicit not-found page instead of silently registering the user
+    // against an arbitrary other event.
+    if (events.length && !selectedEvent) {
+      const urlEv = new URLSearchParams(window.location.search).get("event") || "(missing)";
+      return {
+        title: "Event link is not valid",
+        body: `We could not find an active event for this URL. The link may be expired, mistyped, or for a different organisation. Please ask the event team for the correct QR or link.`,
+        meta: `Event ID requested: ${urlEv}`,
+      };
+    }
+    // Events list still loading.
     if (!events.length || !selectedEvent) return null;
     if ((selectedEvent.status || "active") === "closed") {
       return { title: "This event is inactive", body: "The organiser has paused this event. The form will return once it is reactivated." };
@@ -2256,6 +2295,11 @@ function App() {
                 <strong>Event:</strong> {selectedEvent.title}<br />
                 <strong>Date:</strong> {formatDate(selectedEvent.eventDate)}<br />
                 <strong>Location:</strong> {selectedEvent.location}
+              </p>
+            )}
+            {participantBlock.meta && (
+              <p className="gform-meta" style={{ marginTop: 8, fontSize: 12, color: "#71717A" }}>
+                {participantBlock.meta}
               </p>
             )}
           </div>
