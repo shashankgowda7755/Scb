@@ -490,6 +490,64 @@ function ParticipantPopup({ popup, onClose }) {
   );
 }
 
+// In-app confirm modal. State-driven, always renders inside the React tree,
+// so it cannot be silently dismissed by Chrome (unlike window.confirm /
+// window.prompt). If `requireType` is provided, the user must type the exact
+// phrase into a textbox before the confirm button enables.
+function ConfirmDialog({ state }) {
+  const [typed, setTyped] = useState("");
+  // Reset the typed field every time a new dialog opens.
+  useEffect(() => {
+    setTyped("");
+  }, [state?.open, state?.requireType]);
+
+  if (!state || !state.open) return null;
+
+  const requireType = state.requireType;
+  const canConfirm = !requireType || typed.trim().toUpperCase() === String(requireType).toUpperCase();
+
+  return (
+    <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label={state.title}>
+      <div className={`confirm-card ${state.danger ? "confirm-card-danger" : ""}`}>
+        <h2 className="confirm-title">{state.title}</h2>
+        <p className="confirm-body">{state.body}</p>
+        {requireType && (
+          <div className="confirm-type">
+            <label htmlFor="confirm-type-input">
+              Type <strong>{requireType}</strong> to confirm
+            </label>
+            <input
+              id="confirm-type-input"
+              autoFocus
+              autoComplete="off"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={requireType}
+            />
+          </div>
+        )}
+        <div className="confirm-actions">
+          <button
+            type="button"
+            className="gform-submit confirm-cancel"
+            onClick={() => state.onResolve(false)}
+          >
+            {state.cancelLabel}
+          </button>
+          <button
+            type="button"
+            className={`gform-submit confirm-go ${state.danger ? "confirm-go-danger" : ""}`}
+            disabled={!canConfirm}
+            onClick={() => state.onResolve(true)}
+          >
+            {state.confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walkInOpen, setWalkInOpen, onWalkInConfirm }) {
   const [walkInName, setWalkInName] = useState("");
   return (
@@ -751,6 +809,29 @@ function App() {
   // was captured (and, where relevant, that a flag was raised — e.g. checked
   // out without checking in).
   const [participantPopup, setParticipantPopup] = useState(null);
+
+  // In-app confirm dialog. Replaces window.confirm / window.prompt because
+  // Chrome will silently auto-dismiss those if the page lost a user-gesture
+  // tick or another modal stole focus. This stays in the React tree so the
+  // operator always gets a click target. Usage:
+  //   const ok = await askConfirm({ title, body, danger, confirmLabel, requireType });
+  //   if (!ok) return;
+  const [confirmState, setConfirmState] = useState(null);
+  const askConfirm = (opts) => new Promise((resolve) => {
+    setConfirmState({
+      open: true,
+      title: opts.title || "Confirm",
+      body: opts.body || "",
+      danger: !!opts.danger,
+      confirmLabel: opts.confirmLabel || "Confirm",
+      cancelLabel: opts.cancelLabel || "Cancel",
+      requireType: opts.requireType || null,
+      onResolve: (result) => {
+        setConfirmState(null);
+        resolve(result);
+      },
+    });
+  });
 
   // Reports
   const [reportFilter, setReportFilter] = useState("ALL");
@@ -1206,12 +1287,14 @@ function App() {
   async function handleDeleteEvent(eventArg) {
     const ev = eventArg || selectedEvent;
     if (!ev) return;
-
-    const shouldDelete = window.confirm(
-      `Delete "${ev.title}" and all of its registrations, check-ins, check-outs, and attendance? This cannot be undone.`,
-    );
-    if (!shouldDelete) return;
-
+    const ok = await askConfirm({
+      title: `Delete "${ev.title}"?`,
+      body: "Removes the event and ALL of its registrations, check-ins, check-outs, and attendance. This cannot be undone.",
+      danger: true,
+      confirmLabel: "Delete Event",
+      requireType: "DELETE",
+    });
+    if (!ok) return;
     try {
       await deleteEvent(ev.id);
       setMessage({
@@ -1219,24 +1302,22 @@ function App() {
         text: `"${ev.title}" deleted along with all related data.`,
       });
     } catch (error) {
-      setMessage({
-        type: "error",
-        text: "Unable to delete the event right now.",
-      });
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+      setMessage({ type: "error", text: `Unable to delete the event — ${detail}` });
+      console.error("[deleteEvent]", error);
     }
   }
 
   async function handleWipeAllEvents() {
     if (!events.length) return;
-    const confirm1 = window.confirm(
-      `Delete ALL ${events.length} events and every registration / check-in / check-out / attendance record across the platform?\n\nLogin accounts (admin users) are NOT affected.\n\nThis cannot be undone.`,
-    );
-    if (!confirm1) return;
-    const typed = window.prompt('Type "WIPE" to confirm this destructive action.');
-    if (typed !== "WIPE") {
-      setMessage({ type: "error", text: "Wipe cancelled — confirmation text did not match." });
-      return;
-    }
+    const ok = await askConfirm({
+      title: `Wipe ALL ${events.length} events?`,
+      body: "Deletes every event AND every registration / check-in / check-out / attendance record across the platform. Admin login accounts are NOT affected. This cannot be undone.",
+      danger: true,
+      confirmLabel: "Wipe All Data",
+      requireType: "WIPE",
+    });
+    if (!ok) return;
     setMessage({ type: "", text: "" });
     try {
       let count = 0;
@@ -1249,10 +1330,9 @@ function App() {
         text: `Wiped ${count} events and all related data. Admin logins untouched.`,
       });
     } catch (error) {
-      setMessage({
-        type: "error",
-        text: "Wipe stopped mid-way. Some events may have been deleted. Refresh and try again.",
-      });
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+      setMessage({ type: "error", text: `Wipe stopped mid-way — ${detail}. Refresh and try again.` });
+      console.error("[wipeAllEvents]", error);
     }
   }
 
@@ -1284,18 +1364,21 @@ function App() {
       ? events.find((e) => e.id === eventOrId)
       : (eventOrId || selectedEvent);
     if (!ev) return;
-    const typed = window.prompt(
-      `This wipes ALL data tied to "${ev.title}" — registrations, check-ins, check-outs, attendance — but keeps the event itself so you can re-run it.\n\nType the word RESET to confirm.`,
-    );
-    if (typed !== "RESET") {
-      if (typed !== null) setMessage({ type: "error", text: "Reset cancelled — confirmation word didn't match." });
-      return;
-    }
+    const ok = await askConfirm({
+      title: `Reset data for "${ev.title}"?`,
+      body: "Wipes all registrations, check-ins, check-outs, and attendance for this event. The event itself is preserved so you can re-run it. This cannot be undone.",
+      danger: true,
+      confirmLabel: "Reset Data",
+      requireType: "RESET",
+    });
+    if (!ok) return;
     try {
       await resetEventData(ev.id);
       setMessage({ type: "success", text: `Event data reset for "${ev.title}". Event preserved.` });
     } catch (error) {
-      setMessage({ type: "error", text: `Failed to reset event data: ${error?.message || error}` });
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
+      setMessage({ type: "error", text: `Failed to reset event data — ${detail}` });
+      console.error("[resetEventData]", error);
     }
   }
 
@@ -1329,12 +1412,13 @@ function App() {
   }
 
   async function handleRegenerateKey() {
-    const proceed = window.confirm(
-      "Generate a brand-new encryption key? Existing encrypted records will become unreadable. Useful for the demo to show that the data is meaningless without the key.",
-    );
-    if (!proceed) {
-      return;
-    }
+    const proceed = await askConfirm({
+      title: "Rotate encryption key?",
+      body: "Generates a new key. Existing encrypted records become unreadable. Used in the demo to show that the data is meaningless without the key.",
+      danger: true,
+      confirmLabel: "Rotate Key",
+    });
+    if (!proceed) return;
     setKeyBusy(true);
     try {
       const fingerprint = await regenerateKey();
@@ -1484,16 +1568,17 @@ function App() {
   async function handleCloseEvent(eventArg) {
     const ev = eventArg || selectedEvent;
     if (!ev) return;
-    const proceed = window.confirm(
-      `Deactivate "${ev.title}"? This stops accepting new registrations / check-ins and finalizes the attendance report.`,
-    );
-    if (!proceed) return;
+    const ok = await askConfirm({
+      title: `Deactivate "${ev.title}"?`,
+      body: "Stops accepting new registrations and check-ins. Finalizes the attendance report. You can reactivate later.",
+      danger: true,
+      confirmLabel: "Deactivate",
+    });
+    if (!ok) return;
     try {
       await closeEvent(ev.id);
       setMessage({ type: "success", text: `"${ev.title}" deactivated. Attendance report finalized.` });
     } catch (error) {
-      // Surface the actual Firestore error code/message so we can debug rule
-      // rejections, network failures, etc. instead of a silent "failed".
       const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
       setMessage({ type: "error", text: `Deactivate failed — ${detail}` });
       console.error("[closeEvent]", error);
@@ -2125,6 +2210,7 @@ function App() {
 
   return (
     <div className="scb-shell">
+      <ConfirmDialog state={confirmState} />
       <div className="scb-layout">
         <aside className="scb-sidebar">
           <div className="scb-sidebar-brand">

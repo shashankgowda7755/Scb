@@ -1793,3 +1793,124 @@ td {
   color: var(--gray-400);
   user-select: none;
 }
+
+/* ---------- In-app confirm dialog (replaces window.confirm/prompt) ---------- */
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgba(10, 10, 10, 0.7);
+  backdrop-filter: blur(8px);
+  animation: fadeIn 0.18s ease-out;
+}
+
+.confirm-card {
+  width: min(480px, 100%);
+  background: var(--paper);
+  border-radius: 16px;
+  padding: 1.5rem 1.5rem 1.25rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+  border-top: 6px solid var(--ink);
+  animation: popIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.confirm-card-danger {
+  border-top-color: #DC2626;
+}
+
+.confirm-title {
+  margin: 0 0 0.6rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.confirm-body {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--gray-700);
+}
+
+.confirm-type {
+  margin-bottom: 1rem;
+}
+
+.confirm-type label {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--gray-700);
+  margin-bottom: 0.35rem;
+}
+
+.confirm-type label strong {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: #DC2626;
+  letter-spacing: 0.05em;
+}
+
+.confirm-type input {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 8px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.95rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.confirm-type input:focus {
+  outline: 2px solid rgba(255, 107, 26, 0.18);
+  border-color: var(--orange);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+.confirm-cancel {
+  width: auto;
+  padding: 0.55rem 1rem;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--gray-300);
+  box-shadow: none;
+}
+
+.confirm-cancel:hover:not(:disabled) {
+  background: var(--gray-100);
+  border-color: var(--gray-400);
+  box-shadow: none;
+  transform: none;
+}
+
+.confirm-go {
+  width: auto;
+  padding: 0.55rem 1.1rem;
+  background: var(--ink);
+}
+
+.confirm-go:hover:not(:disabled) {
+  background: var(--orange);
+}
+
+.confirm-go-danger {
+  background: #DC2626;
+}
+
+.confirm-go-danger:hover:not(:disabled) {
+  background: #B91C1C;
+}
+
+.confirm-go:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
