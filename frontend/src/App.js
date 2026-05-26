@@ -2134,52 +2134,101 @@ function App() {
                 const prior = duplicateState.existingRecord || {};
                 const pending = duplicateState.pendingRegistration || {};
                 const ev = duplicateState.event;
+                const uidLabel = ev?.uniqueIdLabel || "Bank ID";
                 const fmt = (v) => {
                   if (v === undefined || v === null || v === "") return "—";
                   if (typeof v === "boolean") return v ? "Yes" : "No";
                   if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
                   return String(v);
                 };
+                const sameStr = (a, b) => fmt(a) === fmt(b);
                 const fields = Array.isArray(ev?.formFields) ? ev.formFields : [];
-                // Render diff for every "structured" field the Form Builder
-                // can produce. Text/email/phone diffs aren't useful to flash
-                // and would leak PII into the dialog.
-                const diffFields = fields.filter((f) =>
-                  ["radio", "dropdown", "checkboxes", "checkbox", "date"].includes(f.type),
-                );
                 const priorCD = (duplicateDecrypted && duplicateDecrypted.customData) || {};
                 const pendingCD = pending.customData || {};
-                let rows = diffFields.map((f) => ({
-                  label: f.label || f.key,
-                  prior: fmt(priorCD[f.key]),
-                  now: fmt(pendingCD[f.key]),
-                }));
-                // Back-compat: events without custom Form Builder fields fall
-                // back to the legacy `participation` boolean.
-                if (rows.length === 0) {
-                  rows = [{
+
+                // Build a list of ONLY-changed rows. Two flavors:
+                //   - "value" rows reveal what changed (used for structured
+                //     fields where the value is short + non-PII)
+                //   - "redacted" rows just say "changed" without leaking the
+                //     value (text / email / phone / Full Name / Bank ID)
+                const rows = [];
+
+                // Full Name (decrypted comparison; redacted display).
+                if (duplicateDecrypted && fmt(duplicateDecrypted.fullName) !== fmt(pending.fullName)) {
+                  rows.push({ label: "Full Name", kind: "redacted" });
+                }
+                // Bank ID / Unique ID.
+                if (duplicateDecrypted && fmt(duplicateDecrypted.employeeId) !== fmt(pending.employeeId)) {
+                  rows.push({ label: uidLabel, kind: "redacted" });
+                }
+
+                // Per-field comparison from Form Builder schema.
+                for (const f of fields) {
+                  const before = priorCD[f.key];
+                  const after = pendingCD[f.key];
+                  if (sameStr(before, after)) continue;
+                  if (["radio", "dropdown", "checkboxes", "checkbox", "date"].includes(f.type)) {
+                    rows.push({
+                      label: f.label || f.key,
+                      kind: "value",
+                      prior: fmt(before),
+                      now: fmt(after),
+                    });
+                  } else {
+                    // text / longtext / email / phone — value redacted.
+                    rows.push({ label: f.label || f.key, kind: "redacted" });
+                  }
+                }
+
+                // Legacy fallback: events with no custom Form Builder schema
+                // still carry the legacy `participation` boolean. Only show if
+                // it actually flipped.
+                if (fields.length === 0
+                    && (prior.participation || "Yes") !== (pending.participation || "Yes")) {
+                  rows.push({
                     label: "Attending",
+                    kind: "value",
                     prior: fmt(prior.participation || "Yes"),
                     now: fmt(pending.participation || "Yes"),
-                  }];
+                  });
                 }
+
+                // Photo consent flip.
+                if (Boolean(prior.photoConsent) !== Boolean(pending.photoConsent)) {
+                  rows.push({
+                    label: "Photo consent",
+                    kind: "value",
+                    prior: prior.photoConsent ? "Yes" : "No",
+                    now: pending.photoConsent ? "Yes" : "No",
+                  });
+                }
+
                 const stamp = formatDateTime(prior.updatedAt || prior.createdAt);
                 return (
                   <div className="duplicate-diff">
                     <div className="duplicate-diff-row">
                       <span>Previously submitted on <strong>{stamp}</strong>.</span>
                     </div>
-                    {rows.map((row, i) => {
-                      const changed = row.prior !== row.now;
-                      return (
+                    {rows.length === 0 ? (
+                      <div className="duplicate-diff-row">
+                        <span>No changes from your previous submission — your entry is identical.</span>
+                      </div>
+                    ) : (
+                      rows.map((row, i) => (
                         <div className="duplicate-diff-row" key={i}>
-                          <span>
-                            <strong>{row.label}</strong> — previously: <strong>{row.prior}</strong>; now: <strong>{row.now}</strong>.
-                          </span>
-                          {changed && <span className="duplicate-diff-flag">CHANGED</span>}
+                          {row.kind === "value" ? (
+                            <span>
+                              <strong>{row.label}</strong> — previously: <strong>{row.prior}</strong>; now: <strong>{row.now}</strong>.
+                            </span>
+                          ) : (
+                            <span>
+                              <strong>{row.label}</strong> — value changed.
+                            </span>
+                          )}
+                          <span className="duplicate-diff-flag">CHANGED</span>
                         </div>
-                      );
-                    })}
+                      ))
+                    )}
                   </div>
                 );
               })()}
@@ -3732,54 +3781,82 @@ function App() {
                       const prior = duplicateState.existingRecord;
                       const pending = duplicateState.pendingRegistration || {};
                       const ev = duplicateState.event;
+                      const uidLabel = ev?.uniqueIdLabel || "Bank ID";
                       const fmt = (v) => {
                         if (v === undefined || v === null || v === "") return "—";
                         if (typeof v === "boolean") return v ? "Yes" : "No";
                         if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
                         return String(v);
                       };
+                      const sameStr = (a, b) => fmt(a) === fmt(b);
                       const fields = Array.isArray(ev?.formFields) ? ev.formFields : [];
-                      const diffFields = fields.filter((f) =>
-                        ["radio", "dropdown", "checkboxes", "checkbox", "date"].includes(f.type),
-                      );
                       const priorCD = (duplicateDecrypted && duplicateDecrypted.customData) || {};
                       const pendingCD = pending.customData || {};
-                      let rows = diffFields.map((f) => ({
-                        label: f.label || f.key,
-                        prior: fmt(priorCD[f.key]),
-                        now: fmt(pendingCD[f.key]),
-                      }));
-                      if (rows.length === 0) {
-                        rows = [{
+
+                      const rows = [];
+                      if (duplicateDecrypted && fmt(duplicateDecrypted.fullName) !== fmt(pending.fullName)) {
+                        rows.push({ label: "Full Name", kind: "redacted" });
+                      }
+                      if (duplicateDecrypted && fmt(duplicateDecrypted.employeeId) !== fmt(pending.employeeId)) {
+                        rows.push({ label: uidLabel, kind: "redacted" });
+                      }
+                      for (const f of fields) {
+                        const before = priorCD[f.key];
+                        const after = pendingCD[f.key];
+                        if (sameStr(before, after)) continue;
+                        if (["radio", "dropdown", "checkboxes", "checkbox", "date"].includes(f.type)) {
+                          rows.push({
+                            label: f.label || f.key,
+                            kind: "value",
+                            prior: fmt(before),
+                            now: fmt(after),
+                          });
+                        } else {
+                          rows.push({ label: f.label || f.key, kind: "redacted" });
+                        }
+                      }
+                      if (fields.length === 0
+                          && (prior.participation || "Yes") !== (pending.participation || "Yes")) {
+                        rows.push({
                           label: "Attending",
+                          kind: "value",
                           prior: fmt(prior.participation || "Yes"),
                           now: fmt(pending.participation || "Yes"),
-                        }];
+                        });
                       }
-                      const priorConsent = prior.photoConsent;
-                      const pendingConsent = pending.photoConsent;
-                      const consentChanged = priorConsent !== pendingConsent;
+                      if (Boolean(prior.photoConsent) !== Boolean(pending.photoConsent)) {
+                        rows.push({
+                          label: "Photo consent",
+                          kind: "value",
+                          prior: prior.photoConsent ? "Yes" : "No",
+                          now: pending.photoConsent ? "Yes" : "No",
+                        });
+                      }
+
                       return (
                         <div className="duplicate-diff">
                           <div className="duplicate-diff-row">
                             <span>Previously submitted on <strong>{formatDateTime(prior.updatedAt || prior.createdAt)}</strong>.</span>
                           </div>
-                          {rows.map((row, i) => {
-                            const changed = row.prior !== row.now;
-                            return (
-                              <div className="duplicate-diff-row" key={i}>
-                                <span>
-                                  <strong>{row.label}</strong> — previously: <strong>{row.prior}</strong>; now: <strong>{row.now}</strong>.
-                                </span>
-                                {changed && <span className="duplicate-diff-flag">CHANGED</span>}
-                              </div>
-                            );
-                          })}
-                          {consentChanged && (
+                          {rows.length === 0 ? (
                             <div className="duplicate-diff-row">
-                              <span>Photo consent: was <strong>{priorConsent ? "Yes" : "No"}</strong>, now <strong>{pendingConsent ? "Yes" : "No"}</strong>.</span>
-                              <span className="duplicate-diff-flag">CHANGED</span>
+                              <span>No changes from the previous submission — entry is identical.</span>
                             </div>
+                          ) : (
+                            rows.map((row, i) => (
+                              <div className="duplicate-diff-row" key={i}>
+                                {row.kind === "value" ? (
+                                  <span>
+                                    <strong>{row.label}</strong> — previously: <strong>{row.prior}</strong>; now: <strong>{row.now}</strong>.
+                                  </span>
+                                ) : (
+                                  <span>
+                                    <strong>{row.label}</strong> — value changed.
+                                  </span>
+                                )}
+                                <span className="duplicate-diff-flag">CHANGED</span>
+                              </div>
+                            ))
                           )}
                         </div>
                       );
