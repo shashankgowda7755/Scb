@@ -2,27 +2,42 @@ rules_version = '2';
 
 // Security rules for the SCB Event Registration platform.
 //
-// Trust model (Phase A hardening):
+// Trust model (current, post-2026-05-26 sweep):
 //   - Sensitive fields are AES-256-GCM encrypted in the browser BEFORE writing.
-//   - Public writes are allowed on /registrations, /checkins, /checkouts so
-//     anonymous participants can submit from the QR link. Writes are
-//     shape-validated: ciphertext format on PII, valid event reference,
-//     event is "active".
-//   - Reads on /registrations, /checkins, /checkouts, /attendance are LOCKED
-//     to authenticated admins (existing /users doc). A breach attacker without
-//     valid Firebase Auth + admin allowlist cannot enumerate registrations,
-//     even with the project id.
-//   - /events publicly readable (the QR scan resolves event id without auth).
+//   - Public read on /events (QR scan needs it without auth).
+//   - Public read on /registrations, /checkins, /checkouts — returns
+//     CIPHERTEXT only. Anonymous participants need this so the bundle can
+//     run a duplicate-check getDoc before setDoc. Decryption requires the
+//     AES key which (TODAY) is inlined in the JS bundle. Phase B moves the
+//     key to Google Secret Manager + a Cloud Function decrypt envelope so
+//     public-read of ciphertext becomes safely meaningless.
+//   - Admin-only read on /attendance, /audit, /users (no anonymous reason
+//     to read these).
+//   - Anonymous writes on /registrations, /checkins, /checkouts. Writes
+//     are shape-validated: encrypted format on PII, valid + active event
+//     reference, 24-hex-char dedupeHash (no empty / forged hashes), each
+//     encrypted field capped at 12000 chars to block DoS bloat.
+//   - All other writes admin-only. /audit + /checkins.update +
+//     /checkouts.update are immutable (allow update: if false).
 //
-// V2 hardening (later phases): Cloud Function envelope so the AES key lives
-// only in Google Secret Manager; rotate re-encrypts historic data.
+// V2 hardening (planned): Cloud Function encrypt/decrypt envelope so the AES
+// key lives only in Google Secret Manager. Key rotation re-encrypts historic
+// data. Audit log captures every decrypt operation with operator uid.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function hasEncryptedShape(field) {
       return field is string
+        && field.size() <= 12000  // 10k plaintext ~13k base64 ciphertext. Blocks ~1MB DoS writes.
         && (field.size() == 0 || field.matches('^enc:v[12]:.+\\..+'));
+    }
+
+    function hasValidDedupeHash(h) {
+      // SHA-256 first-24-hex-chars per crypto.js hashDedupeValue. Reject
+      // empty / forged hashes that would let an attacker squat docId
+      // `${eventId}__` and collide with legitimate writes.
+      return h is string && h.size() == 24 && h.matches('^[0-9a-f]{24}$');
     }
 
     function isValidEventRef(eventId) {
@@ -74,7 +89,7 @@ service cloud.firestore {
           hasEncryptedShape(request.resource.data.photoConsent)
           || request.resource.data.photoConsent is bool
         )
-        && request.resource.data.dedupeHash is string;
+        && hasValidDedupeHash(request.resource.data.dedupeHash);
       allow delete: if isAdmin();
     }
 
@@ -89,7 +104,7 @@ service cloud.firestore {
         && hasEncryptedShape(request.resource.data.uniqueId)
         && hasEncryptedShape(request.resource.data.fullName)
         && request.resource.data.walkInFlag is bool
-        && request.resource.data.dedupeHash is string;
+        && hasValidDedupeHash(request.resource.data.dedupeHash);
       allow update: if false;
       allow delete: if isAdmin();
     }
@@ -103,7 +118,7 @@ service cloud.firestore {
         && hasEncryptedShape(request.resource.data.uniqueId)
         && hasEncryptedShape(request.resource.data.fullName)
         && request.resource.data.walkInFlag is bool
-        && request.resource.data.dedupeHash is string;
+        && hasValidDedupeHash(request.resource.data.dedupeHash);
       allow update: if false;
       allow delete: if isAdmin();
     }
@@ -115,14 +130,24 @@ service cloud.firestore {
     }
 
     // Audit log — append-only record of admin actions. Reads admin-only;
-    // creates admin-only (callers attach their own auth context). No
-    // updates, no deletes — once written, an audit row is immutable.
-    // Operator email is encrypted at rest (hasEncryptedShape).
+    // creates admin-only. No updates, no deletes — once written, an audit
+    // row is immutable. Operator email is encrypted at rest. Anti-forgery:
+    // the actorUid MUST equal the authenticated user — one admin cannot
+    // forge an audit row attributing an action to another admin. Action
+    // strings restricted to the known vocabulary so the audit table can't
+    // be filled with garbage to obscure real entries.
     match /audit/{auditId} {
       allow read: if isAdmin();
       allow create: if isAdmin()
-        && request.resource.data.action is string
-        && request.resource.data.actorUid is string
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.action in [
+          'sign-in', 'sign-out',
+          'event-create', 'event-edit', 'event-close', 'event-reopen',
+          'event-delete', 'event-reset',
+          'csv-export', 'reveal',
+          'user-add', 'user-remove',
+          'key-rotate'
+        ]
         && hasEncryptedShape(request.resource.data.actorEmail)
         && hasEncryptedShape(request.resource.data.targetLabel);
       allow update, delete: if false;
