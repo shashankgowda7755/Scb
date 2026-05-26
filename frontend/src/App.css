@@ -1674,6 +1674,8 @@ td {
 .participant-popup-good { border-top: 6px solid #059669; }
 .participant-popup-warn { border-top: 6px solid var(--orange); }
 .participant-popup-info { border-top: 6px solid #2563EB; }
+.participant-popup-error { border-top: 6px solid #DC2626; }
+.participant-popup-error .participant-popup-icon { background: #DC2626; }
 
 .participant-popup-icon {
   width: 64px;

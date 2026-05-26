@@ -868,9 +868,11 @@ async function buildAttendanceLog(event, kind, { uniqueId, fullName, registratio
 }
 
 export async function saveCheckIn({ event, uniqueId, fullName }) {
-  if (!event || event.status === "closed") {
-    return { status: "event-closed" };
-  }
+  if (!event) return { status: "event-not-found" };
+  if (event.status === "closed") return { status: "event-closed" };
+  if (event.checkInEnabled === false) return { status: "form-disabled" };
+  if (!uniqueId || !String(uniqueId).trim()) return { status: "missing-id" };
+
   const lookup = await findRegistrationByUniqueId(event, uniqueId);
   const registration = lookup.record;
   const recordId = `${event.id}__${lookup.dedupeHash}`;
@@ -898,6 +900,8 @@ export async function saveCheckIn({ event, uniqueId, fullName }) {
 
 export async function saveCheckOut({ event, uniqueId, fullName }) {
   if (!event) return { status: "event-not-found" };
+  if (event.checkOutEnabled === false) return { status: "form-disabled" };
+  if (!uniqueId || !String(uniqueId).trim()) return { status: "missing-id" };
 
   const lookup = await findRegistrationByUniqueId(event, uniqueId);
   const registration = lookup.record;

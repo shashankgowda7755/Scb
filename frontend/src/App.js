@@ -411,6 +411,34 @@ function ParticipantPopup({ popup, onClose }) {
       };
     }
     if (popup.kind === "checkin") {
+      if (popup.status === "duplicate") {
+        return {
+          tone: "error",
+          title: "You are already checked in",
+          body: `We already have a check-in entry for this ID${popup.time ? ` at ${formatDateTime(popup.time)}` : ""}. No second check-in was recorded.`,
+        };
+      }
+      if (popup.status === "event-closed") {
+        return {
+          tone: "error",
+          title: "This event is no longer accepting check-ins",
+          body: "The event has been closed by the organiser. Please ask the event team at the desk.",
+        };
+      }
+      if (popup.status === "form-disabled") {
+        return {
+          tone: "error",
+          title: "Check-in is paused",
+          body: "The check-in form has been turned off by the organiser for this event.",
+        };
+      }
+      if (popup.status === "missing-id") {
+        return {
+          tone: "error",
+          title: "Enter your ID",
+          body: "Type or scan your Unique ID to check in.",
+        };
+      }
       if (popup.status === "walk-in") {
         return {
           tone: "warn",
@@ -428,6 +456,34 @@ function ParticipantPopup({ popup, onClose }) {
       };
     }
     if (popup.kind === "checkout") {
+      if (popup.status === "duplicate") {
+        return {
+          tone: "error",
+          title: "You have already checked out",
+          body: `We already have a checkout entry for this ID${popup.time ? ` at ${formatDateTime(popup.time)}` : ""}. No second checkout was recorded.`,
+        };
+      }
+      if (popup.status === "event-not-found") {
+        return {
+          tone: "error",
+          title: "Event not found",
+          body: "The link is broken or the event has been deleted. Please ask the event team.",
+        };
+      }
+      if (popup.status === "form-disabled") {
+        return {
+          tone: "error",
+          title: "Checkout is paused",
+          body: "The checkout form has been turned off by the organiser for this event.",
+        };
+      }
+      if (popup.status === "missing-id") {
+        return {
+          tone: "error",
+          title: "Enter your ID",
+          body: "Type or scan your Unique ID to check out.",
+        };
+      }
       if (popup.status === "complete") {
         return {
           tone: "good",
@@ -473,7 +529,7 @@ function ParticipantPopup({ popup, onClose }) {
     <div className="participant-popup-overlay" role="dialog" aria-modal="true" aria-label={cfg.title}>
       <div className={`participant-popup participant-popup-${cfg.tone}`}>
         <div className="participant-popup-icon">
-          {cfg.tone === "warn" ? "!" : "✓"}
+          {cfg.tone === "error" ? "✕" : cfg.tone === "warn" ? "!" : "✓"}
         </div>
         <h2 className="participant-popup-title">{cfg.title}</h2>
         <p className="participant-popup-body">{cfg.body}</p>
@@ -1455,12 +1511,25 @@ function App() {
       if (result.status === "duplicate") {
         const t = result.existing.checkInTime;
         setCheckInResult({ kind: "duplicate", time: t, masked: result.existing.maskedUniqueId });
+        setParticipantPopup({ open: true, kind: "checkin", status: "duplicate", time: t });
         setMessage({ type: "error", text: `Already checked in at ${formatDateTime(t)}.` });
         setCheckInBusy(false);
         return;
       }
       if (result.status === "event-closed") {
+        setParticipantPopup({ open: true, kind: "checkin", status: "event-closed" });
         setMessage({ type: "error", text: "Event is closed. Reopen the event to accept check-ins." });
+        setCheckInBusy(false);
+        return;
+      }
+      if (result.status === "form-disabled") {
+        setParticipantPopup({ open: true, kind: "checkin", status: "form-disabled" });
+        setMessage({ type: "error", text: "Check-in is paused for this event." });
+        setCheckInBusy(false);
+        return;
+      }
+      if (result.status === "missing-id") {
+        setParticipantPopup({ open: true, kind: "checkin", status: "missing-id" });
         setCheckInBusy(false);
         return;
       }
@@ -1518,7 +1587,25 @@ function App() {
       if (result.status === "duplicate") {
         const t = result.existing.checkOutTime;
         setCheckOutResult({ kind: "duplicate", time: t, masked: result.existing.maskedUniqueId });
+        setParticipantPopup({ open: true, kind: "checkout", status: "duplicate", time: t });
         setMessage({ type: "error", text: `Already checked out at ${formatDateTime(t)}.` });
+        setCheckOutBusy(false);
+        return;
+      }
+      if (result.status === "event-not-found") {
+        setParticipantPopup({ open: true, kind: "checkout", status: "event-not-found" });
+        setMessage({ type: "error", text: "Event not found." });
+        setCheckOutBusy(false);
+        return;
+      }
+      if (result.status === "form-disabled") {
+        setParticipantPopup({ open: true, kind: "checkout", status: "form-disabled" });
+        setMessage({ type: "error", text: "Checkout is paused for this event." });
+        setCheckOutBusy(false);
+        return;
+      }
+      if (result.status === "missing-id") {
+        setParticipantPopup({ open: true, kind: "checkout", status: "missing-id" });
         setCheckOutBusy(false);
         return;
       }
