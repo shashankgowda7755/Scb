@@ -1916,3 +1916,71 @@ td {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ---------- Revision pill + history timeline ---------- */
+
+.revision-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: var(--orange-soft);
+  color: var(--orange-deep);
+  border: 1px solid rgba(255, 107, 26, 0.3);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.revision-pill:hover {
+  background: rgba(255, 107, 26, 0.18);
+}
+
+.revision-pill-flat {
+  background: var(--gray-100);
+  color: var(--gray-600);
+  border-color: var(--gray-200);
+  cursor: default;
+}
+
+.revision-pill-flat:hover {
+  background: var(--gray-100);
+}
+
+.revision-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.revision-timeline li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.55rem 0.75rem;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  font-size: 0.86rem;
+}
+
+.revision-timeline li.revision-current {
+  background: var(--orange-soft);
+  border-color: rgba(255, 107, 26, 0.3);
+}
+
+.revision-timeline li strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.revision-timeline li span {
+  color: var(--gray-600);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.82rem;
+}

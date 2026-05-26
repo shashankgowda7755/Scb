@@ -618,6 +618,65 @@ function ConfirmDialog({ state }) {
   );
 }
 
+// Submission-history modal. Opens from the Reports table when an attendee
+// has revision > 1 (i.e. they re-submitted via the "Update My Entry" flow).
+// Shows a timeline of every submission with timestamps so the operator can
+// see how many times they iterated and when.
+function RevisionHistoryModal({ state, onClose }) {
+  if (!state || !state.open) return null;
+  const reg = state.registration || {};
+  const history = Array.isArray(reg.history) ? reg.history : [];
+  const total = (reg.revision || history.length + 1);
+  // Build a chronological list: each history entry + the current row.
+  // history[i].replacedAt is when revision i was REPLACED (so the timestamp of
+  // the version BEFORE replacement). The current record's updatedAt is the
+  // latest version's timestamp.
+  const items = [
+    ...history.map((h) => ({
+      revision: h.revision,
+      at: h.replacedAt,
+      label: `Submission #${h.revision} — replaced`,
+    })),
+    {
+      revision: reg.revision || 1,
+      at: reg.updatedAt || reg.createdAt,
+      label: `Submission #${reg.revision || 1} — current`,
+      current: true,
+    },
+  ].sort((a, b) => {
+    const ta = new Date(a.at || 0).getTime();
+    const tb = new Date(b.at || 0).getTime();
+    return ta - tb;
+  });
+
+  return (
+    <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Submission history">
+      <div className="confirm-card">
+        <h2 className="confirm-title">Submission history</h2>
+        <p className="confirm-body">
+          This attendee submitted the registration form <strong>{total}</strong> {total === 1 ? "time" : "times"}. The current row reflects the most recent submission. Earlier values were replaced when the participant chose <em>Update My Entry</em> on the duplicate dialog.
+        </p>
+        <ul className="revision-timeline">
+          {items.map((it, i) => (
+            <li key={i} className={it.current ? "revision-current" : ""}>
+              <strong>{it.label}</strong>
+              <span>{it.at ? formatDateTime(it.at) : "—"}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="confirm-body" style={{ fontSize: "0.8rem", color: "var(--gray-500)", marginTop: "0.5rem" }}>
+          For privacy, the actual field values from earlier submissions are not stored — only when each replacement happened.
+        </p>
+        <div className="confirm-actions">
+          <button type="button" className="gform-submit confirm-cancel" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ParticipantCheckIn({ event, form, setForm, result, busy, onSubmit, walkInOpen, setWalkInOpen, onWalkInConfirm }) {
   const [walkInName, setWalkInName] = useState("");
   return (
@@ -860,6 +919,10 @@ function App() {
   // was captured (and, where relevant, that a flag was raised — e.g. checked
   // out without checking in).
   const [participantPopup, setParticipantPopup] = useState(null);
+
+  // Operator-only "submission history" modal opened from Reports. Shows the
+  // list of timestamps the same Bank ID re-submitted (revision history).
+  const [revisionModal, setRevisionModal] = useState(null);
 
   // In-app confirm dialog. Replaces window.confirm / window.prompt because
   // Chrome will silently auto-dismiss those if the page lost a user-gesture
@@ -2394,6 +2457,7 @@ function App() {
   return (
     <div className="scb-shell">
       <ConfirmDialog state={confirmState} />
+      <RevisionHistoryModal state={revisionModal} onClose={() => setRevisionModal(null)} />
       <div className="scb-layout">
         <aside className="scb-sidebar">
           <div className="scb-sidebar-brand">
@@ -3334,6 +3398,7 @@ function App() {
                           <TableHead>Check-In</TableHead>
                           <TableHead>Checkout</TableHead>
                           <TableHead>Status</TableHead>
+                          <TableHead>Submissions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -3342,6 +3407,14 @@ function App() {
                           .map((row, idx) => {
                             const decrypted = decryptedAttendance[idx];
                             const showPlain = !privacyMode && decrypted;
+                            // Match the source registration to surface revision
+                            // count + history (set when the same Bank ID is
+                            // submitted multiple times via the Replace path).
+                            const reg = row.registrationId
+                              ? eventRegistrations.find((r) => r.id === row.registrationId)
+                              : null;
+                            const revision = reg?.revision || (reg ? 1 : 0);
+                            const hasHistory = revision > 1;
                             return (
                               <TableRow key={row.id}>
                                 <TableCell>{showPlain ? decrypted.fullName : <span className="cell-hidden">•••</span>}</TableCell>
@@ -3353,6 +3426,28 @@ function App() {
                                   <Badge variant="outline" className={statusPillClass(row.statusCode)}>
                                     {STATUS_LABEL[row.statusCode] || row.statusCode}
                                   </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {reg ? (
+                                    hasHistory ? (
+                                      <button
+                                        type="button"
+                                        className="revision-pill"
+                                        onClick={() => setRevisionModal({
+                                          open: true,
+                                          registration: reg,
+                                          attendance: row,
+                                        })}
+                                        title="Click to see when each submission happened"
+                                      >
+                                        {revision} <span style={{ opacity: 0.7, fontWeight: 400 }}>(history)</span>
+                                      </button>
+                                    ) : (
+                                      <span className="revision-pill revision-pill-flat">1</span>
+                                    )
+                                  ) : (
+                                    <span style={{ color: "var(--gray-400)" }}>—</span>
+                                  )}
                                 </TableCell>
                               </TableRow>
                             );
