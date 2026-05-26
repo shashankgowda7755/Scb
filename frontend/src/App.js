@@ -2621,25 +2621,31 @@ function App() {
                 }
 
                 // Legacy fallback: events with no custom Form Builder schema
-                // still carry the legacy `participation` boolean. Only show if
-                // it actually flipped.
+                // still carry the legacy `participation` field. Read decrypted
+                // values from duplicateDecrypted (not raw prior which still
+                // holds ciphertext like 'enc:v1:...'). Only show if flipped.
+                const priorParticipation = duplicateDecrypted?.participation ?? "Yes";
+                const pendingParticipation = pending.participation ?? "Yes";
                 if (fields.length === 0
-                    && (prior.participation || "Yes") !== (pending.participation || "Yes")) {
+                    && duplicateDecrypted
+                    && priorParticipation !== pendingParticipation) {
                   rows.push({
                     label: "Attending",
                     kind: "value",
-                    prior: fmt(prior.participation || "Yes"),
-                    now: fmt(pending.participation || "Yes"),
+                    prior: fmt(priorParticipation),
+                    now: fmt(pendingParticipation),
                   });
                 }
 
-                // Photo consent flip.
-                if (Boolean(prior.photoConsent) !== Boolean(pending.photoConsent)) {
+                // Photo consent flip (decrypted comparison).
+                const priorPhoto = Boolean(duplicateDecrypted?.photoConsent);
+                const pendingPhoto = Boolean(pending.photoConsent);
+                if (duplicateDecrypted && priorPhoto !== pendingPhoto) {
                   rows.push({
                     label: "Photo consent",
                     kind: "value",
-                    prior: prior.photoConsent ? "Yes" : "No",
-                    now: pending.photoConsent ? "Yes" : "No",
+                    prior: priorPhoto ? "Yes" : "No",
+                    now: pendingPhoto ? "Yes" : "No",
                   });
                 }
 
@@ -4305,21 +4311,26 @@ function App() {
                           rows.push({ label: f.label || f.key, kind: "redacted" });
                         }
                       }
+                      const priorParticipation = duplicateDecrypted?.participation ?? "Yes";
+                      const pendingParticipation = pending.participation ?? "Yes";
                       if (fields.length === 0
-                          && (prior.participation || "Yes") !== (pending.participation || "Yes")) {
+                          && duplicateDecrypted
+                          && priorParticipation !== pendingParticipation) {
                         rows.push({
                           label: "Attending",
                           kind: "value",
-                          prior: fmt(prior.participation || "Yes"),
-                          now: fmt(pending.participation || "Yes"),
+                          prior: fmt(priorParticipation),
+                          now: fmt(pendingParticipation),
                         });
                       }
-                      if (Boolean(prior.photoConsent) !== Boolean(pending.photoConsent)) {
+                      const priorPhoto = Boolean(duplicateDecrypted?.photoConsent);
+                      const pendingPhoto = Boolean(pending.photoConsent);
+                      if (duplicateDecrypted && priorPhoto !== pendingPhoto) {
                         rows.push({
                           label: "Photo consent",
                           kind: "value",
-                          prior: prior.photoConsent ? "Yes" : "No",
-                          now: pending.photoConsent ? "Yes" : "No",
+                          prior: priorPhoto ? "Yes" : "No",
+                          now: pendingPhoto ? "Yes" : "No",
                         });
                       }
 
