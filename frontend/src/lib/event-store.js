@@ -11,7 +11,7 @@ import {
   where,
 } from "firebase/firestore";
 
-import { getFirebaseMode, fallbackToDemoMode, firestoreDb } from "@/lib/firebase";
+import { getFirebaseMode, firestoreDb } from "@/lib/firebase";
 import {
   ENCRYPTED_FIELDS,
   decryptString,
@@ -552,7 +552,7 @@ async function deleteEventCascade(eventId) {
   notifyDemoListeners();
 }
 
-function subscribeToFirestoreCollection(collectionName, callback, sortField, filter, onFallback) {
+function subscribeToFirestoreCollection(collectionName, callback, sortField, filter, onError) {
   const ref = filter
     ? query(collection(firestoreDb, collectionName), where(filter.field, "==", filter.value))
     : collection(firestoreDb, collectionName);
@@ -563,10 +563,11 @@ function subscribeToFirestoreCollection(collectionName, callback, sortField, fil
       callback(sortByNewest(records, sortField));
     },
     (error) => {
-      if (error?.code === "permission-denied" || error?.code === "unavailable") {
-        fallbackToDemoMode(`Firestore ${error.code}: rules not deployed or offline`);
-        if (onFallback) onFallback();
-      }
+      // Surface the error loudly. NEVER silently fall back to a local
+      // demo store — that's what made the operator dashboard show empty
+      // while participants saw success popups during the meeting.
+      console.error(`[firestore.${collectionName}] subscription error:`, error);
+      if (onError) onError(error);
     },
   );
 }
@@ -590,20 +591,17 @@ function subscribeCollection(name, callback, filter) {
   const sortField = SORT_FIELD[name];
   let firestoreUnsub = null;
   let demoUnsub = null;
-  let usingDemo = false;
-  function switchToDemo() {
-    if (usingDemo) return;
-    usingDemo = true;
-    if (firestoreUnsub) {
-      try { firestoreUnsub(); } catch {}
-      firestoreUnsub = null;
-    }
-    demoUnsub = subscribeToDemoCollection(name, callback, sortField, filter);
-  }
   if (getFirebaseMode() === "firebase") {
-    firestoreUnsub = subscribeToFirestoreCollection(name, callback, sortField, filter, switchToDemo);
+    // In firebase mode we NEVER switch to demo on errors. Demo-fallback
+    // hid real Firestore rejection from the operator. Errors now surface
+    // via console.error (already done in subscribeToFirestoreCollection)
+    // and the subscription simply stops emitting new data — operator sees
+    // a stale snapshot, not a phantom local store.
+    firestoreUnsub = subscribeToFirestoreCollection(name, callback, sortField, filter, null);
   } else {
-    switchToDemo();
+    // Only used when Firebase isn't configured at all (local dev with
+    // missing env). Never reached in production.
+    demoUnsub = subscribeToDemoCollection(name, callback, sortField, filter);
   }
   return () => {
     if (firestoreUnsub) try { firestoreUnsub(); } catch {}
@@ -630,9 +628,8 @@ export async function probeFirestore() {
   try {
     await getDocs(collection(firestoreDb, "events"));
   } catch (error) {
-    if (error?.code === "permission-denied" || error?.code === "unavailable") {
-      fallbackToDemoMode(`Firestore ${error.code}: rules not deployed`);
-    }
+    // Surface but do not switch modes. Demo fallback is dead in prod.
+    console.error("[probeFirestore]", error);
   }
   return getFirebaseMode();
 }
@@ -659,18 +656,14 @@ export function subscribeAttendance(callback, eventId) {
 
 export async function createEvent(input) {
   if (getFirebaseMode() === "firebase") {
-    const r = await safeFirestoreWrite(() => createEventInFirestore(input));
-    if (r && r.__fellBackToDemo) return createEventInDemo(input);
-    return r;
+    return await createEventInFirestore(input);
   }
   return createEventInDemo(input);
 }
 
 export async function saveRegistration(payload) {
   if (getFirebaseMode() === "firebase") {
-    const r = await safeFirestoreWrite(() => saveRegistrationInFirestore(payload));
-    if (r && r.__fellBackToDemo) return saveRegistrationInDemo(payload);
-    return r;
+    return await saveRegistrationInFirestore(payload);
   }
   return saveRegistrationInDemo(payload);
 }
@@ -842,8 +835,7 @@ async function writeCollectionDoc(name, record) {
     notifyDemoListeners();
   }
   if (getFirebaseMode() === "firebase") {
-    const r = await safeFirestoreWrite(() => setDoc(doc(firestoreDb, name, record.id), record));
-    if (r && r.__fellBackToDemo) writeDemo();
+    await setDoc(doc(firestoreDb, name, record.id), record);
     return;
   }
   writeDemo();
@@ -851,17 +843,10 @@ async function writeCollectionDoc(name, record) {
 
 async function listCollectionByEvent(name, eventId) {
   if (getFirebaseMode() === "firebase") {
-    try {
-      const q = query(collection(firestoreDb, name), where("eventId", "==", eventId));
-      const snap = await getDocs(q);
-      return snap.docs.map(normalizeFirestoreDoc);
-    } catch (e) {
-      if (e?.code === "permission-denied" || e?.code === "unavailable") {
-        fallbackToDemoMode(`Firestore ${e.code} on read`);
-      } else {
-        throw e;
-      }
-    }
+    // Throw on every error. No silent fallback to demo store.
+    const q = query(collection(firestoreDb, name), where("eventId", "==", eventId));
+    const snap = await getDocs(q);
+    return snap.docs.map(normalizeFirestoreDoc);
   }
   const store = loadDemoStore();
   return (store[name] || []).filter((item) => item.eventId === eventId);

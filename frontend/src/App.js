@@ -1442,10 +1442,12 @@ function App() {
         text: `Event "${createdEvent.title}" is ready. You can now share the QR code or registration link.`,
       });
     } catch (error) {
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
       setMessage({
         type: "error",
-        text: "Unable to create the event right now. Please check the Firebase configuration and try again.",
+        text: `Could not create event — ${detail}`,
       });
+      console.error("[createEvent]", error);
     } finally {
       setCreatingEvent(false);
     }
@@ -1532,10 +1534,18 @@ function App() {
         text: "The existing registration has been replaced and revision history was preserved.",
       });
     } catch (error) {
+      const detail = error?.code ? `${error.code}: ${error.message}` : (error?.message || String(error));
       setMessage({
         type: "error",
-        text: "Unable to replace the existing registration right now.",
+        text: `Could not replace existing registration — ${detail}`,
       });
+      setParticipantPopup({
+        open: true,
+        kind: "register",
+        status: "error",
+        errorDetail: detail,
+      });
+      console.error("[confirmDuplicateReplace]", error);
     } finally {
       setSubmitting(false);
       setDuplicateState({
