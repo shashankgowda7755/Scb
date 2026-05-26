@@ -2133,18 +2133,53 @@ function App() {
               {(() => {
                 const prior = duplicateState.existingRecord || {};
                 const pending = duplicateState.pendingRegistration || {};
-                const priorPart = prior.participation || "Yes";
-                const pendingPart = pending.participation || "Yes";
-                const changed = priorPart !== pendingPart;
+                const ev = duplicateState.event;
+                const fmt = (v) => {
+                  if (v === undefined || v === null || v === "") return "—";
+                  if (typeof v === "boolean") return v ? "Yes" : "No";
+                  if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
+                  return String(v);
+                };
+                const fields = Array.isArray(ev?.formFields) ? ev.formFields : [];
+                // Render diff for every "structured" field the Form Builder
+                // can produce. Text/email/phone diffs aren't useful to flash
+                // and would leak PII into the dialog.
+                const diffFields = fields.filter((f) =>
+                  ["radio", "dropdown", "checkboxes", "checkbox", "date"].includes(f.type),
+                );
+                const priorCD = (duplicateDecrypted && duplicateDecrypted.customData) || {};
+                const pendingCD = pending.customData || {};
+                let rows = diffFields.map((f) => ({
+                  label: f.label || f.key,
+                  prior: fmt(priorCD[f.key]),
+                  now: fmt(pendingCD[f.key]),
+                }));
+                // Back-compat: events without custom Form Builder fields fall
+                // back to the legacy `participation` boolean.
+                if (rows.length === 0) {
+                  rows = [{
+                    label: "Attending",
+                    prior: fmt(prior.participation || "Yes"),
+                    now: fmt(pending.participation || "Yes"),
+                  }];
+                }
+                const stamp = formatDateTime(prior.updatedAt || prior.createdAt);
                 return (
                   <div className="duplicate-diff">
                     <div className="duplicate-diff-row">
-                      <span>Previously on {formatDateTime(prior.updatedAt || prior.createdAt)} you said attending: <strong>{priorPart}</strong>.</span>
+                      <span>Previously submitted on <strong>{stamp}</strong>.</span>
                     </div>
-                    <div className="duplicate-diff-row">
-                      <span>Now you are saying attending: <strong>{pendingPart}</strong>.</span>
-                      {changed && <span className="duplicate-diff-flag">CHANGED</span>}
-                    </div>
+                    {rows.map((row, i) => {
+                      const changed = row.prior !== row.now;
+                      return (
+                        <div className="duplicate-diff-row" key={i}>
+                          <span>
+                            <strong>{row.label}</strong> — previously: <strong>{row.prior}</strong>; now: <strong>{row.now}</strong>.
+                          </span>
+                          {changed && <span className="duplicate-diff-flag">CHANGED</span>}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
@@ -3696,23 +3731,50 @@ function App() {
                     {(() => {
                       const prior = duplicateState.existingRecord;
                       const pending = duplicateState.pendingRegistration || {};
-                      const priorPart = prior.participation || "Yes";
-                      const pendingPart = pending.participation || "Yes";
-                      const participationChanged = priorPart !== pendingPart;
+                      const ev = duplicateState.event;
+                      const fmt = (v) => {
+                        if (v === undefined || v === null || v === "") return "—";
+                        if (typeof v === "boolean") return v ? "Yes" : "No";
+                        if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
+                        return String(v);
+                      };
+                      const fields = Array.isArray(ev?.formFields) ? ev.formFields : [];
+                      const diffFields = fields.filter((f) =>
+                        ["radio", "dropdown", "checkboxes", "checkbox", "date"].includes(f.type),
+                      );
+                      const priorCD = (duplicateDecrypted && duplicateDecrypted.customData) || {};
+                      const pendingCD = pending.customData || {};
+                      let rows = diffFields.map((f) => ({
+                        label: f.label || f.key,
+                        prior: fmt(priorCD[f.key]),
+                        now: fmt(pendingCD[f.key]),
+                      }));
+                      if (rows.length === 0) {
+                        rows = [{
+                          label: "Attending",
+                          prior: fmt(prior.participation || "Yes"),
+                          now: fmt(pending.participation || "Yes"),
+                        }];
+                      }
                       const priorConsent = prior.photoConsent;
                       const pendingConsent = pending.photoConsent;
                       const consentChanged = priorConsent !== pendingConsent;
                       return (
                         <div className="duplicate-diff">
                           <div className="duplicate-diff-row">
-                            <span>Previously on {formatDateTime(prior.updatedAt || prior.createdAt)} this person said attending: <strong>{priorPart}</strong>.</span>
+                            <span>Previously submitted on <strong>{formatDateTime(prior.updatedAt || prior.createdAt)}</strong>.</span>
                           </div>
-                          <div className="duplicate-diff-row">
-                            <span>Now submitting attending: <strong>{pendingPart}</strong>.</span>
-                            {participationChanged && (
-                              <span className="duplicate-diff-flag">CHANGED</span>
-                            )}
-                          </div>
+                          {rows.map((row, i) => {
+                            const changed = row.prior !== row.now;
+                            return (
+                              <div className="duplicate-diff-row" key={i}>
+                                <span>
+                                  <strong>{row.label}</strong> — previously: <strong>{row.prior}</strong>; now: <strong>{row.now}</strong>.
+                                </span>
+                                {changed && <span className="duplicate-diff-flag">CHANGED</span>}
+                              </div>
+                            );
+                          })}
                           {consentChanged && (
                             <div className="duplicate-diff-row">
                               <span>Photo consent: was <strong>{priorConsent ? "Yes" : "No"}</strong>, now <strong>{pendingConsent ? "Yes" : "No"}</strong>.</span>
