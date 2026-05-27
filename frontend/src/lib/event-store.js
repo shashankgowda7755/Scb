@@ -8,9 +8,11 @@ import {
   getDocsFromServer,
   onSnapshot,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
 
 import { getFirebaseMode, firestoreDb } from "@/lib/firebase";
@@ -483,25 +485,74 @@ async function createEventInDemo(input) {
   return eventRecord;
 }
 
+// Two-step dedupe-via-public-collection pattern:
+//
+// 1. /dedupe/{kind}-{eventId}__{hash} stores ONLY {eventId, dedupeHash,
+//    kind, lastSubmittedAt, expiresAt}. Public read so anonymous
+//    participants can detect their own prior submissions without
+//    needing read access on the PII-bearing collection. Hash is
+//    SHA-256 with per-event salt — irreversible, leaks no PII.
+//
+// 2. /registrations, /checkins, /checkouts hold the ciphertext PII.
+//    These are LOCKED to admin-only read again, so a public-URL
+//    attacker cannot pair (bundle AES key) with (ciphertext dump) to
+//    decrypt everyone's data.
+//
+// The write path uses a Firestore batch so /dedupe and the PII doc
+// land atomically. If admin deletes a record, the cascade deletes
+// the matching /dedupe row too — otherwise stale dedupe entries
+// would falsely report a deleted participant as still registered.
+
+function dedupeDocId(kind, eventId, hash) {
+  return `${kind}-${eventId}__${hash}`;
+}
+
 async function saveRegistrationInFirestore({ event, formData, replace }) {
   const dedupeValue = pickDedupeValue(event.duplicateField, formData);
   const dedupeHash = await hashDedupeValue(event.id, dedupeValue);
   const recordId = `${event.id}__${dedupeHash}`;
-  const registrationRef = doc(firestoreDb, "registrations", recordId);
-  // Force server fetch (not cache). When admin clicks Reset Data or
-  // Delete Event in one tab, the participant's getDoc in another tab
-  // can return a stale cached snapshot showing the deleted record as
-  // still existing → spurious "duplicate" modal even though the data
-  // was deleted. getDocFromServer bypasses the local SDK cache.
-  const existingSnapshot = await getDocFromServer(registrationRef);
-  const existingRecord = existingSnapshot.exists() ? normalizeFirestoreDoc(existingSnapshot) : null;
+  const dedupeId = dedupeDocId("reg", event.id, dedupeHash);
+  const dedupeRef = doc(firestoreDb, "dedupe", dedupeId);
+
+  // Anonymous-readable existence check on /dedupe (no PII). Server-only
+  // to dodge stale cache after admin delete.
+  const dedupeSnap = await getDocFromServer(dedupeRef);
+  let existingRecord = null;
+  if (dedupeSnap.exists()) {
+    // Prior submission exists. To populate the "you already submitted"
+    // diff modal we need the encrypted record. Anonymous reads on
+    // /registrations are admin-only now, so the participant view can't
+    // fetch the prior record. Surface the "duplicate" status with a
+    // shallow stub — the diff modal will just say "you already
+    // submitted on <timestamp>, want to update?" without showing the
+    // per-field diff (PII protected).
+    existingRecord = {
+      id: recordId,
+      dedupeHash,
+      updatedAt: dedupeSnap.data().lastSubmittedAt,
+      // No fullName/email/phone — they're admin-read-only.
+    };
+  }
 
   if (existingRecord && !replace) {
     return { status: "duplicate", existingRecord };
   }
 
   const registrationRecord = await buildRegistrationRecord(event, formData, existingRecord);
-  await setDoc(registrationRef, registrationRecord);
+
+  // Atomic batch: /dedupe + /registrations land together. If one
+  // succeeds and the other fails the participant retries — no orphan
+  // records.
+  const batch = writeBatch(firestoreDb);
+  batch.set(doc(firestoreDb, "registrations", recordId), registrationRecord);
+  batch.set(dedupeRef, {
+    eventId: event.id,
+    dedupeHash,
+    kind: "reg",
+    lastSubmittedAt: serverTimestamp(),
+    expiresAt: registrationRecord.expiresAt,
+  });
+  await batch.commit();
 
   return {
     status: existingRecord ? "updated" : "created",
@@ -540,9 +591,9 @@ async function saveRegistrationInDemo({ event, formData, replace }) {
 async function deleteEventCascade(eventId) {
   if (getFirebaseMode() === "firebase") {
     await deleteDoc(doc(firestoreDb, "events", eventId));
-    for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
-      // Server-only enumeration. Stale cache could omit recent writes
-      // and leave orphans behind after the cascade.
+    // Note: "dedupe" included — stale /dedupe entries would falsely
+    // report a deleted participant as still submitted.
+    for (const sub of ["registrations", "checkins", "checkouts", "attendance", "dedupe"]) {
       const snap = await getDocsFromServer(
         query(collection(firestoreDb, sub), where("eventId", "==", eventId)),
       );
@@ -704,12 +755,9 @@ export async function setEventFormEnabled(eventId, formKey, enabled) {
 
 export async function resetEventData(eventId) {
   if (getFirebaseMode() === "firebase") {
-    for (const sub of ["registrations", "checkins", "checkouts", "attendance"]) {
-      // Server-only + indexed query. Previously read whole collection
-      // then client-side filtered, which (a) read stale cache, (b)
-      // burned reads at scale, (c) could miss freshly-written docs not
-      // yet synced. getDocsFromServer + where(eventId) is the precise
-      // and fresh path.
+    // Include /dedupe in the wipe — otherwise a 'cleared' participant
+    // would still show as duplicate on next submit.
+    for (const sub of ["registrations", "checkins", "checkouts", "attendance", "dedupe"]) {
       const snap = await getDocsFromServer(
         query(collection(firestoreDb, sub), where("eventId", "==", eventId)),
       );
@@ -916,22 +964,50 @@ export async function saveCheckIn({ event, uniqueId, fullName, allowWalkIn }) {
   if (event.checkInEnabled === false) return { status: "form-disabled" };
   if (!uniqueId || !String(uniqueId).trim()) return { status: "missing-id" };
 
-  const lookup = await findRegistrationByUniqueId(event, uniqueId);
-  const registration = lookup.record;
-  const recordId = `${event.id}__${lookup.dedupeHash}`;
+  const dedupeValue = dedupeValueOf(event.duplicateField, uniqueId);
+  const dedupeHash = await hashDedupeValue(event.id, dedupeValue);
+  const recordId = `${event.id}__${dedupeHash}`;
 
-  const existing = await readCollectionDoc("checkins", recordId);
-  if (existing) {
-    return { status: "duplicate", existing };
+  // Two anonymous-readable lookups against /dedupe instead of the
+  // admin-only /registrations + /checkins collections:
+  //   - "ci-..." doc tells us if this person already checked in (duplicate)
+  //   - "reg-..." doc tells us if this person was registered (walk-in vs reg)
+  const ciDedupe = await getDocFromServer(
+    doc(firestoreDb, "dedupe", dedupeDocId("ci", event.id, dedupeHash)),
+  );
+  if (ciDedupe.exists()) {
+    return {
+      status: "duplicate",
+      existing: {
+        id: recordId,
+        dedupeHash,
+        checkInTime: ciDedupe.data().lastSubmittedAt,
+      },
+    };
   }
+
+  const regDedupe = await getDocFromServer(
+    doc(firestoreDb, "dedupe", dedupeDocId("reg", event.id, dedupeHash)),
+  );
+  const hasRegistration = regDedupe.exists();
 
   // No prior registration AND the caller hasn't explicitly opted in to a
   // walk-in capture: return a confirmation status without writing anything.
-  // The UI shows a "Could not find earlier registration — still check in?"
-  // confirm, collects the attendee's name, then retries with
-  // allowWalkIn:true.
-  if (!registration && !allowWalkIn) {
+  if (!hasRegistration && !allowWalkIn) {
     return { status: "needs-walkin-confirm" };
+  }
+
+  // Operator-mode caller (signed in) can attempt to fetch the prior
+  // registration to use the encrypted name. Anonymous participant
+  // can't read /registrations — gracefully skip name lookup.
+  let registration = null;
+  if (hasRegistration) {
+    try {
+      const snap = await getDocFromServer(doc(firestoreDb, "registrations", recordId));
+      if (snap.exists()) registration = normalizeFirestoreDoc(snap);
+    } catch {
+      // permission-denied for anonymous read of /registrations — fine.
+    }
   }
 
   const nameForRecord = fullName || (registration ? await decryptString(registration.fullName).catch(() => "") : "");
@@ -940,10 +1016,23 @@ export async function saveCheckIn({ event, uniqueId, fullName, allowWalkIn }) {
     fullName: nameForRecord,
     registration,
   });
-  await writeCollectionDoc("checkins", record);
+  // Atomic batch write: /checkins + /dedupe land together.
+  const batch = writeBatch(firestoreDb);
+  batch.set(doc(firestoreDb, "checkins", recordId), record);
+  batch.set(doc(firestoreDb, "dedupe", dedupeDocId("ci", event.id, dedupeHash)), {
+    eventId: event.id,
+    dedupeHash,
+    kind: "ci",
+    lastSubmittedAt: serverTimestamp(),
+    expiresAt: record.expiresAt,
+  });
+  await batch.commit();
 
   return {
-    status: registration ? "checked-in" : "walk-in",
+    // Use hasRegistration (from /dedupe lookup) not `registration` —
+    // anonymous can't read /registrations, so `registration` is null
+    // even when a legit registration exists in the PII collection.
+    status: hasRegistration ? "checked-in" : "walk-in",
     record,
     registration,
     displayName: nameForRecord,
@@ -955,16 +1044,52 @@ export async function saveCheckOut({ event, uniqueId, fullName }) {
   if (event.checkOutEnabled === false) return { status: "form-disabled" };
   if (!uniqueId || !String(uniqueId).trim()) return { status: "missing-id" };
 
-  const lookup = await findRegistrationByUniqueId(event, uniqueId);
-  const registration = lookup.record;
-  const recordId = `${event.id}__${lookup.dedupeHash}`;
+  const dedupeValue = dedupeValueOf(event.duplicateField, uniqueId);
+  const dedupeHash = await hashDedupeValue(event.id, dedupeValue);
+  const recordId = `${event.id}__${dedupeHash}`;
 
-  const existing = await readCollectionDoc("checkouts", recordId);
-  if (existing) {
-    return { status: "duplicate", existing };
+  // Three /dedupe lookups (all anonymous-readable, no PII):
+  //   - "co-..." → already checked out? (duplicate)
+  //   - "reg-..." → was registered?
+  //   - "ci-..." → did they check in?
+  const coDedupe = await getDocFromServer(
+    doc(firestoreDb, "dedupe", dedupeDocId("co", event.id, dedupeHash)),
+  );
+  if (coDedupe.exists()) {
+    return {
+      status: "duplicate",
+      existing: {
+        id: recordId,
+        dedupeHash,
+        checkOutTime: coDedupe.data().lastSubmittedAt,
+      },
+    };
   }
+  const regDedupe = await getDocFromServer(
+    doc(firestoreDb, "dedupe", dedupeDocId("reg", event.id, dedupeHash)),
+  );
+  const hasRegistration = regDedupe.exists();
+  const ciDedupe = await getDocFromServer(
+    doc(firestoreDb, "dedupe", dedupeDocId("ci", event.id, dedupeHash)),
+  );
+  const hasCheckIn = ciDedupe.exists();
 
-  const checkInRecord = await readCollectionDoc("checkins", recordId);
+  // Try to fetch full PII docs (operator/admin path will succeed,
+  // anonymous fails silently). Name shown in popup only if fetch works.
+  let registration = null;
+  let checkInRecord = null;
+  if (hasRegistration) {
+    try {
+      const s = await getDocFromServer(doc(firestoreDb, "registrations", recordId));
+      if (s.exists()) registration = normalizeFirestoreDoc(s);
+    } catch {}
+  }
+  if (hasCheckIn) {
+    try {
+      const s = await getDocFromServer(doc(firestoreDb, "checkins", recordId));
+      if (s.exists()) checkInRecord = normalizeFirestoreDoc(s);
+    } catch {}
+  }
 
   const nameForRecord =
     fullName ||
@@ -976,12 +1101,23 @@ export async function saveCheckOut({ event, uniqueId, fullName }) {
     fullName: nameForRecord,
     registration,
   });
-  await writeCollectionDoc("checkouts", record);
+
+  // Atomic batch: /checkouts + /dedupe land together.
+  const batch = writeBatch(firestoreDb);
+  batch.set(doc(firestoreDb, "checkouts", recordId), record);
+  batch.set(doc(firestoreDb, "dedupe", dedupeDocId("co", event.id, dedupeHash)), {
+    eventId: event.id,
+    dedupeHash,
+    kind: "co",
+    lastSubmittedAt: serverTimestamp(),
+    expiresAt: record.expiresAt,
+  });
+  await batch.commit();
 
   let status;
-  if (registration && checkInRecord) status = "complete";
-  else if (registration && !checkInRecord) status = "reg-checkout-no-checkin";
-  else if (!registration && checkInRecord) status = "walkin-complete";
+  if (hasRegistration && hasCheckIn) status = "complete";
+  else if (hasRegistration && !hasCheckIn) status = "reg-checkout-no-checkin";
+  else if (!hasRegistration && hasCheckIn) status = "walkin-complete";
   else status = "walkin-checkout";
 
   return { status, record, registration, checkInRecord, displayName: nameForRecord };

@@ -2,27 +2,24 @@ rules_version = '2';
 
 // Security rules for the SCB Event Registration platform.
 //
-// Trust model (current, post-2026-05-26 sweep):
-//   - Sensitive fields are AES-256-GCM encrypted in the browser BEFORE writing.
-//   - Public read on /events (QR scan needs it without auth).
-//   - Public read on /registrations, /checkins, /checkouts — returns
-//     CIPHERTEXT only. Anonymous participants need this so the bundle can
-//     run a duplicate-check getDoc before setDoc. Decryption requires the
-//     AES key which (TODAY) is inlined in the JS bundle. Phase B moves the
-//     key to Google Secret Manager + a Cloud Function decrypt envelope so
-//     public-read of ciphertext becomes safely meaningless.
-//   - Admin-only read on /attendance, /audit, /users (no anonymous reason
-//     to read these).
-//   - Anonymous writes on /registrations, /checkins, /checkouts. Writes
-//     are shape-validated: encrypted format on PII, valid + active event
-//     reference, 24-hex-char dedupeHash (no empty / forged hashes), each
-//     encrypted field capped at 12000 chars to block DoS bloat.
-//   - All other writes admin-only. /audit + /checkins.update +
-//     /checkouts.update are immutable (allow update: if false).
+// Trust model (current, post-Phase-C dedupe-collection refactor):
+//   - PII is AES-256-GCM encrypted in the browser before write.
+//   - /events: public read (QR resolves event id without auth), admin write.
+//   - /registrations, /checkins, /checkouts: PII-bearing collections.
+//     ADMIN-ONLY READ. Public WRITE with shape validation. An attacker who
+//     has the bundle (and therefore the AES key) cannot enumerate ciphertext
+//     because reads are locked.
+//   - /dedupe: lightweight existence map. Public read + write. Each doc
+//     stores only {eventId, dedupeHash, kind, lastSubmittedAt, expiresAt}.
+//     Hash is SHA-256-with-event-salt — irreversible. Anonymous participants
+//     use /dedupe to detect their own duplicate submission without needing
+//     read access on the PII collection.
+//   - /attendance: admin-only end-to-end (computed roll-up).
+//   - /audit, /users: admin-only.
 //
-// V2 hardening (planned): Cloud Function encrypt/decrypt envelope so the AES
-// key lives only in Google Secret Manager. Key rotation re-encrypts historic
-// data. Audit log captures every decrypt operation with operator uid.
+// V2 (planned): Cloud Function decrypt envelope so the AES key lives only in
+// Google Secret Manager. Decryption only happens through an authenticated,
+// audited function call.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -61,13 +58,10 @@ service cloud.firestore {
     }
 
     match /registrations/{registrationId} {
-      // Public read of ciphertext. Anonymous participants need this to
-      // detect their own duplicate registrations (the client calls
-      // getDoc before setDoc to surface the "you already registered"
-      // modal). PII is AES-256-GCM ciphertext — a reader sees only
-      // `enc:v1:...` strings. Decryption requires the operator AES key.
-      // The dedupeHash is SHA-256 with per-event salt, irreversible.
-      allow read: if true;
+      // ADMIN-ONLY READ. Duplicate detection moved to /dedupe (public
+      // existence-only map). Anonymous participants no longer touch this
+      // collection during their own duplicate-check flow.
+      allow read: if isAdmin();
       // Public write — anonymous participants submit ciphertext via the QR.
       allow create, update: if
         request.resource.data.eventId is string
@@ -94,9 +88,9 @@ service cloud.firestore {
     }
 
     match /checkins/{checkInId} {
-      // Public read of ciphertext (same rationale as /registrations).
-      // Required so anonymous check-in can detect "already checked in".
-      allow read: if true;
+      // ADMIN-ONLY READ. /dedupe holds the existence map for duplicate
+      // check-in detection.
+      allow read: if isAdmin();
       allow create: if
         request.resource.data.eventId is string
         && isValidEventRef(request.resource.data.eventId)
@@ -110,8 +104,8 @@ service cloud.firestore {
     }
 
     match /checkouts/{checkOutId} {
-      // Public read of ciphertext (same rationale as /registrations).
-      allow read: if true;
+      // ADMIN-ONLY READ. /dedupe holds the existence map.
+      allow read: if isAdmin();
       allow create: if
         request.resource.data.eventId is string
         && isValidEventRef(request.resource.data.eventId)
@@ -127,6 +121,22 @@ service cloud.firestore {
       // Roll-up of registrations + checkins + checkouts. Admin-only end-to-end.
       allow read: if isAdmin();
       allow create, update, delete: if isAdmin();
+    }
+
+    // Public existence-map. Stores only {eventId, dedupeHash, kind,
+    // lastSubmittedAt, expiresAt}. Hash is SHA-256-with-event-salt —
+    // irreversible, leaks no PII. Used so anonymous participants can
+    // self-detect duplicates without read access on /registrations etc.
+    // Doc id format: `{kind}-{eventId}__{hash}` (kind: 'reg'|'ci'|'co').
+    match /dedupe/{dedupeId} {
+      allow read: if true;
+      allow create, update: if
+        request.resource.data.eventId is string
+        && isValidEventRef(request.resource.data.eventId)
+        && eventIsActive(request.resource.data.eventId)
+        && hasValidDedupeHash(request.resource.data.dedupeHash)
+        && request.resource.data.kind in ['reg', 'ci', 'co'];
+      allow delete: if isAdmin();
     }
 
     // Audit log — append-only record of admin actions. Reads admin-only;
